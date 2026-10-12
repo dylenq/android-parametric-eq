@@ -5,7 +5,6 @@ build/
 local.properties
 *.keystore
 *.jks
-rust-probe/target/
 app/src/main/jniLibs/
 *.iml
 .idea/
