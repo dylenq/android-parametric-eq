@@ -83,8 +83,10 @@ class EqRuntime(
         onGlobalRejected = { reason -> onGlobalRejected(reason) },
     )
 
+    // Bypass is core state, so the very first status already carries the loaded value instead of
+    // waiting for the worker's first publishStatus (a cold-start UI would otherwise flash "on").
     private val _status = MutableStateFlow(
-        ServiceStatus(notice = when (opened.second) {
+        ServiceStatus(bypass = controller.snapshot().bypass, notice = when (opened.second) {
             is StoreNotice.NewerVersion -> "Saved settings were made by a newer version and were set aside"
             StoreNotice.Damaged -> "Saved settings were damaged and were set aside"
             null -> null

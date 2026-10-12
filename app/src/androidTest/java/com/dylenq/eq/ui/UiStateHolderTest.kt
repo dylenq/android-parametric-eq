@@ -120,6 +120,23 @@ class UiStateHolderTest {
         await(h, 1000) { !it.bypass }
     }
 
+    @Test fun aNewHolderOnABypassedStateReportsBypassOnItsVeryFirstEmission() {
+        ctrl.setBypass(true)
+        rt.runtime.flush()
+        // Repeated: the old behaviour only failed while the new worker had not yet published.
+        repeat(25) { i ->
+            val r = EqRuntime(FakeEffectFactory(), rt.dir, SettingsStore(null))
+            val h = UiStateHolder(r)
+            try {
+                assertTrue("cold start #$i: first emission must carry bypass", h.ui.value.bypass)
+                assertTrue("cold start #$i: status carries bypass before the worker runs", r.status.value.bypass)
+            } finally {
+                h.close()
+                r.shutdown()
+            }
+        }
+    }
+
     // ---- drags and undo grouping --------------------------------------------------------
 
     @Test fun oneDragIsOneUndoStep() {
