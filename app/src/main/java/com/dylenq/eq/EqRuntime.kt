@@ -33,7 +33,7 @@ class EqRuntime(
         Thread(r, "eq-effects")
     }
 
-    private val manager = EffectManager(factory) { currentParams() }
+    private val manager = EffectManager(factory, { currentParams() })
 
     val isAttached: Boolean get() = attached.get()
 
