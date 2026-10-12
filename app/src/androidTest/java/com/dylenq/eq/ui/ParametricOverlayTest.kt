@@ -1,7 +1,11 @@
 package com.dylenq.eq.ui
 
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.down
+import androidx.compose.ui.test.moveBy
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.up
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dylenq.eq.core.EqMode
 import kotlinx.coroutines.flow.first
@@ -94,4 +98,44 @@ class ParametricOverlayTest : CurveTestBase() {
         assertNotNull(holder.ui.value.curve!!.selectedBandDb)
         assertTrue("overlay changes pixels", !with.contentEquals(without))
     }
+
+    // ---- readout chip and haptics (task 3) ----
+
+    @Test fun readoutChipShowsWhileDraggingAndGoesAfterRelease() {
+        hostCard()
+        val start = node(3)
+        rule.compose.onNodeWithTag("curve-interaction").performTouchInput {
+            down(start)
+            moveBy(androidx.compose.ui.geometry.Offset(0f, -dp(30f)))
+            moveBy(androidx.compose.ui.geometry.Offset(0f, -dp(10f)))
+        }
+        rule.compose.waitForIdle()
+        rule.compose.onNodeWithTag("node-readout", useUnmergedTree = true).assertExists()
+        val shown = holder.ui.value.bands[3]
+        // TalkBack must not see it.
+        val sem = rule.compose.onNodeWithTag("node-readout", useUnmergedTree = true).fetchSemanticsNode()
+        assertTrue("chip has no semantics of its own", sem.config.none { it.key.name == "Text" })
+        assertEquals(3, holder.ui.value.draggingBand)
+        assertTrue(shown.gainDb > 0f)
+        rule.compose.onNodeWithTag("curve-interaction").performTouchInput { up() }
+        rule.compose.waitForIdle()
+        rule.compose.mainClock.advanceTimeBy(400)
+        rule.compose.onNodeWithTag("node-readout", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test fun dragFiresStartTickAndEndHaptics() {
+        hostCard()
+        val start = node(3)
+        rule.compose.onNodeWithTag("curve-interaction").performTouchInput {
+            down(start)
+            repeat(6) { moveBy(androidx.compose.ui.geometry.Offset(0f, -dp(12f))) }
+            up()
+        }
+        rule.compose.waitForIdle()
+        val t = haptics.types.toList()
+        assertEquals(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate, t.first())
+        assertEquals(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureEnd, t.last())
+        assertTrue("at least one tick on the way: $t", t.size >= 3)
+    }
+
 }

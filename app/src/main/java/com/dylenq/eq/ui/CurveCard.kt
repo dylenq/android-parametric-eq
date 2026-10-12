@@ -230,6 +230,12 @@ fun CurveCard(
                         onDeselect = parametric.onDeselect,
                         modifier = Modifier.matchParentSize(),
                     )
+                    NodeReadoutChip(
+                        bands = { state().bands },
+                        dragging = { state().draggingBand },
+                        yWindow = { anim.value },
+                        modifier = Modifier.matchParentSize(),
+                    )
                 }
                 if (view.bypass) {
                     Surface(

@@ -60,6 +60,7 @@ private class MachineInputs(
     val onDeselect: () -> Unit,
     val haptics: State<Haptics>,
     val tap: TapMemory,
+    val limiter: TickLimiter = TickLimiter(40) { android.os.SystemClock.uptimeMillis() },
 )
 
 private enum class PendingKind { UP, SLOP, SECOND, GONE }
@@ -127,6 +128,7 @@ private suspend fun AwaitPointerEventScope.runGesture(m: MachineInputs) {
                 // Held in place: detection only (the menu arrives in plan 06); no edit, finger ignored until up.
                 m.tap.valid = false
                 m.onSelect(hit)
+                m.haptics.value.longPress()
                 m.onLongPress(hit)
                 consumeUntilUp()
                 return
@@ -171,7 +173,10 @@ private suspend fun AwaitPointerEventScope.runGesture(m: MachineInputs) {
             }
         }
     } finally {
-        if (gate.open) m.onDragEnd()
+        if (gate.open) {
+            m.haptics.value.dragEnd()
+            m.onDragEnd()
+        }
     }
 }
 
@@ -190,16 +195,23 @@ private suspend fun AwaitPointerEventScope.drag(
     m.onDragStart(index)
     m.haptics.value.dragStart()
     var lastGain = band.gainDb
+    var lastFreq = band.freq
     var change = first
     while (true) {
         val delta = change.position - down.position
         val target = nodeAtDown + delta
         val freq = ParametricMath.snapHz(ParametricMath.hzAt(target.x, plot))
         val gain = if (band.kind.hasGain()) ParametricMath.snapDb(ParametricMath.dbAt(target.y, plot, m.yWindow())) else null
-        if (gain != null) {
-            if (gain == 0f && lastGain != 0f) m.haptics.value.zeroDetent()
-            lastGain = gain
+        val zero = gain != null && SliderMath.enteredZero(lastGain, gain)
+        val gainTick = gain != null && SliderMath.wholeDbCrossings(lastGain, gain) > 0
+        val gridTick = FreqGridCrossing.crossed(lastFreq, freq)
+        if (zero) {
+            m.haptics.value.zeroDetent()
+        } else if ((gainTick || gridTick) && m.limiter.tryTick()) {
+            if (gainTick) m.haptics.value.tick() else m.haptics.value.gridTick()
         }
+        if (gain != null) lastGain = gain
+        lastFreq = freq
         m.onNodeChange(index, freq, gain)
         change.consume()
         val ev = awaitPointerEvent(PointerEventPass.Main)
@@ -262,6 +274,7 @@ private suspend fun AwaitPointerEventScope.pinch(
                     if (!gate.open) {
                         gate.open = true
                         m.onDragStart(target)
+                        m.haptics.value.dragStart()
                     }
                     m.onQChange(target, q)
                     lastQ = q
