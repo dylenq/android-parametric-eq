@@ -256,13 +256,39 @@ impl Inner {
         let mut freqs = Vec::with_capacity(n);
         let (mut ideal, mut achieved) = (Vec::with_capacity(n), Vec::with_capacity(n));
         for i in 0..n {
-            let t = i as f64 / (n - 1) as f64;
-            let f = if i == n - 1 { 20_000.0 } else { 20.0 * 1000f64.powf(t) };
+            let f = log_grid_hz(i, n);
             freqs.push(f as f32);
             ideal.push(finite_or_zero(target(f)) as f32);
             achieved.push(finite_or_zero(bins.at(f)) as f32);
         }
         Ok(Curve { freqs_hz: freqs, ideal_db: ideal, achieved_db: achieved })
+    }
+
+    /// One band's own magnitude (dB) on the same log grid as `response_curve`. Read-only; the
+    /// band is evaluated as enabled so a disabled selected band can still be drawn.
+    pub fn band_response(&self, index: usize, points: u32, sample_rate: u32) -> Result<Vec<f32>, EqError> {
+        let band = *self.parametric.get(index).ok_or(EqError::OutOfRange)?;
+        if !(MIN_CURVE_POINTS..=MAX_CURVE_POINTS).contains(&points) {
+            return Err(EqError::InvalidValue);
+        }
+        if !(8_000..=384_000).contains(&sample_rate) {
+            return Err(EqError::InvalidValue);
+        }
+        let target = fit::band_target(band, sample_rate as f64);
+        let n = points as usize;
+        Ok((0..n).map(|i| finite_or_zero(target(log_grid_hz(i, n))) as f32).collect())
+    }
+
+    /// Restores the default bands and a 0 dB preamp as one undo step (no step when unchanged).
+    pub fn reset_bands(&mut self) {
+        if self.parametric == EqState::default().bands && self.preamp_db == 0.0 {
+            return;
+        }
+        let _ = self.edit(|s| {
+            s.parametric = EqState::default().bands;
+            s.preamp_db = 0.0;
+            Ok(())
+        });
     }
 
     pub fn engine_params(&self, sample_rate: u32, frame_ms: f32) -> Result<Engine, EqError> {
@@ -292,6 +318,11 @@ impl Inner {
     pub fn graphic_centres(&self) -> Vec<f32> {
         graphic::centres(self.graphic.band_count).map(|c| c.to_vec()).unwrap_or_default()
     }
+}
+
+/// Frequency of point `i` of `n` on the shared 20 Hz..20 kHz log grid.
+fn log_grid_hz(i: usize, n: usize) -> f64 {
+    if i + 1 == n { 20_000.0 } else { 20.0 * 1000f64.powf(i as f64 / (n - 1) as f64) }
 }
 
 fn finite_or_zero(v: f64) -> f64 {
@@ -334,6 +365,124 @@ mod tests {
         assert_eq!(s.set_frame_duration_ms(1.0), Err(EqError::InvalidValue));
         assert_eq!(s.set_frame_duration_ms(f32::NAN), Err(EqError::InvalidValue));
         assert_eq!(s.edit_snapshot(), before);
+        assert!(!s.can_undo());
+    }
+
+    #[test]
+    fn band_response_peak_reaches_its_gain_at_centre() {
+        let s = Inner { parametric: vec![peak_band(1000.0, 6.0)], ..Inner::default() };
+        let r = s.band_response(0, 256, 48_000).unwrap();
+        assert_eq!(r.len(), 256);
+        assert!(r.iter().all(|v| v.is_finite()));
+        let (imax, vmax) = r.iter().enumerate().fold((0, f32::MIN), |a, (i, &v)| if v > a.1 { (i, v) } else { a });
+        assert!((vmax - 6.0).abs() < 0.01, "{vmax}"); // grid need not land exactly on 1 kHz
+        let centre = fit::band_target(s.parametric[0], 48_000.0)(1000.0);
+        assert!((centre - 6.0).abs() < 1e-3, "{centre}");
+        let f = log_grid_hz(imax, 256);
+        assert!((f / 1000.0).ln().abs() < 0.03, "{f}");
+        let c = crate::dsp::biquad::Coeffs::for_band(&s.parametric[0], 48_000.0);
+        assert!((c.magnitude_db(f, 48_000.0) as f32 - r[imax]).abs() < 1e-4);
+    }
+
+    #[test]
+    fn band_response_lowpass_ignores_gain() {
+        let mut b = Band::new(FilterKind::LowPass, 1000.0);
+        b.q = 0.707;
+        b.gain_db = 0.0;
+        let mut b2 = b;
+        b2.gain_db = 12.0;
+        let a = Inner { parametric: vec![b], ..Inner::default() };
+        let c = Inner { parametric: vec![b2], ..Inner::default() };
+        let ra = a.band_response(0, 128, 48_000).unwrap();
+        assert!(*ra.last().unwrap() < -3.0);
+        assert_eq!(ra, c.band_response(0, 128, 48_000).unwrap());
+    }
+
+    #[test]
+    fn band_response_ignores_enabled_flag() {
+        let on = peak_band(2000.0, -5.0);
+        let mut off = on;
+        off.enabled = false;
+        let a = Inner { parametric: vec![on], ..Inner::default() };
+        let b = Inner { parametric: vec![off], ..Inner::default() };
+        assert_eq!(a.band_response(0, 64, 48_000).unwrap(), b.band_response(0, 64, 48_000).unwrap());
+    }
+
+    #[test]
+    fn band_response_rejects_bad_arguments() {
+        let s = Inner::default();
+        let n = s.parametric.len();
+        assert_eq!(s.band_response(n, 64, 48_000), Err(EqError::OutOfRange));
+        assert_eq!(s.band_response(0, 1, 48_000), Err(EqError::InvalidValue));
+        assert_eq!(s.band_response(0, 2049, 48_000), Err(EqError::InvalidValue));
+        assert_eq!(s.band_response(0, 64, 0), Err(EqError::InvalidValue));
+        assert_eq!(s.band_response(0, 64, 1_000_000), Err(EqError::InvalidValue));
+    }
+
+    #[test]
+    fn band_response_grid_matches_response_curve() {
+        let s = Inner::default();
+        let curve = s.response_curve(100, 48_000, DEFAULT_FRAME_MS).unwrap();
+        assert_eq!(curve.freqs_hz[0], 20.0);
+        assert_eq!(*curve.freqs_hz.last().unwrap(), 20_000.0);
+        for (i, &f) in curve.freqs_hz.iter().enumerate() {
+            assert_eq!(f, log_grid_hz(i, 100) as f32);
+        }
+    }
+
+    #[test]
+    fn band_response_is_read_only() {
+        let mut s = Inner::default();
+        s.set_band(0, peak_band(500.0, 3.0)).unwrap();
+        let before = s.edit_snapshot();
+        let (u, r) = (s.can_undo(), s.can_redo());
+        s.band_response(0, 64, 48_000).unwrap();
+        assert_eq!(s.edit_snapshot(), before);
+        assert_eq!((s.can_undo(), s.can_redo()), (u, r));
+    }
+
+    #[test]
+    fn reset_bands_restores_defaults_as_one_step() {
+        let mut s = Inner::default();
+        s.set_band(0, peak_band(500.0, 3.0)).unwrap();
+        s.add_band().unwrap();
+        s.set_preamp(-6.0).unwrap();
+        let edited = s.edit_snapshot();
+        s.reset_bands();
+        assert_eq!(s.parametric, EqState::default().bands);
+        assert_eq!(s.preamp_db, 0.0);
+        assert!(s.undo());
+        assert_eq!(s.edit_snapshot(), edited);
+    }
+
+    #[test]
+    fn reset_bands_leaves_other_state_alone() {
+        let mut s = Inner::default();
+        s.mode = EqMode::Parametric;
+        s.bypass = true;
+        s.limiter_enabled = false;
+        s.set_frame_duration_ms(50.0).unwrap();
+        s.set_graphic_gain(0, 4.0).unwrap();
+        s.set_preamp(-3.0).unwrap();
+        let g = s.graphic.clone();
+        s.reset_bands();
+        assert_eq!(s.mode, EqMode::Parametric);
+        assert!(s.bypass);
+        assert!(!s.limiter_enabled);
+        assert_eq!(s.frame_duration_ms, 50.0);
+        assert_eq!(s.graphic, g);
+    }
+
+    #[test]
+    fn reset_bands_on_defaults_records_nothing() {
+        let mut s = Inner::default();
+        s.reset_bands();
+        assert!(!s.can_undo());
+        s.set_band(0, peak_band(500.0, 3.0)).unwrap();
+        assert!(s.undo());
+        assert!(s.can_redo());
+        s.reset_bands();
+        assert!(s.can_redo());
         assert!(!s.can_undo());
     }
 

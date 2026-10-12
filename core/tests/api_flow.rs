@@ -295,3 +295,35 @@ fn concurrency_smoke_four_threads() {
     }
     assert_eq!(core.snapshot().graphic_gains_db.len(), 10);
 }
+
+#[test]
+fn reset_bands_through_the_object_is_one_undo_step() {
+    let core = EqCore::new();
+    let defaults = core.snapshot().bands;
+    core.set_band(0, peak(5000.0, 9.0, 1.0)).unwrap();
+    let edited = core.snapshot().bands;
+    core.reset_bands();
+    assert_eq!(core.snapshot().bands, defaults);
+    assert!(core.undo());
+    assert_eq!(core.snapshot().bands, edited);
+}
+
+#[test]
+fn reset_bands_inside_a_gesture_is_one_step() {
+    let core = EqCore::new();
+    core.set_band(0, peak(5000.0, 9.0, 1.0)).unwrap();
+    let edited = core.snapshot().bands;
+    core.begin_edit();
+    core.reset_bands();
+    core.end_edit();
+    assert!(core.undo());
+    assert_eq!(core.snapshot().bands, edited);
+}
+
+#[test]
+fn band_response_db_through_the_object() {
+    let core = parametric_with_lone_peak();
+    let r = core.band_response_db(0, 64, 48_000).unwrap();
+    assert_eq!(r.len(), 64);
+    assert_eq!(core.band_response_db(99, 64, 48_000), Err(EqError::OutOfRange));
+}

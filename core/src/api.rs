@@ -172,6 +172,14 @@ impl EqCore {
         Ok(CurveData { freqs_hz: c.freqs_hz, ideal_db: c.ideal_db, achieved_db: c.achieved_db })
     }
 
+    pub fn band_response_db(&self, index: u32, points: u32, sample_rate: u32) -> Result<Vec<f32>, EqError> {
+        self.lock().band_response(index as usize, points, sample_rate)
+    }
+
+    pub fn reset_bands(&self) {
+        self.lock().reset_bands()
+    }
+
     pub fn engine_params(
         &self,
         sample_rate: u32,
