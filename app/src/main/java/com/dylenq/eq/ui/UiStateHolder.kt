@@ -31,6 +31,11 @@ import kotlinx.coroutines.launch
  * through [com.dylenq.eq.EqController]. The core has no change listener, so after each own edit the
  * holder re-reads the snapshot; bypass, sessions, notice and serviceRunning follow the runtime
  * status flow. The curve (and headroom) is recomputed on a conflated background worker.
+ *
+ * Undo history is one linear stack across Graphic and Parametric (L-07): undo/redo can step through
+ * an edit made in the other mode and nothing skips invisible steps. That is a documented v1
+ * limitation (UNVERIFIED known-limitations entry, written by plan 12). Undo, redo and mode
+ * switching are inert while a gesture is open.
  */
 class UiStateHolder(val runtime: EqRuntime) {
     private val controller = runtime.controller
@@ -66,9 +71,35 @@ class UiStateHolder(val runtime: EqRuntime) {
     /** Number of curve computations performed (tests check conflation). */
     internal val curveComputations = AtomicInteger()
 
-    private var dragOpen = false
-    private var preampDragOpen = false
-    private var parametricOpen = false
+    // One counter for every control that holds an undo group open (graphic slider, preamp,
+    // parametric gesture): begin_edit on 0->1, end_edit on 1->0, so two fingers on two controls still
+    // make one step. Each source has its own flag so a double start or an unmatched end is harmless.
+    // Guarded by [lock].
+    private var gestureDepth = 0
+    private enum class Source { GRAPHIC, PREAMP, PARAMETRIC }
+    private val openSources = java.util.EnumSet.noneOf(Source::class.java)
+
+    /** Opens [source]'s share of the group; a second start from the same source is ignored. */
+    private fun beginGesture(source: Source) {
+        if (source in openSources) return
+        if (gestureDepth == 0) controller.beginEdit()
+        openSources.add(source)
+        gestureDepth++
+        _ui.update { it.copy(gestureOpen = true) }
+    }
+
+    /** Closes [source]'s share; an end without a start is ignored. */
+    private fun endGesture(source: Source) {
+        if (!openSources.remove(source) || gestureDepth == 0) return
+        gestureDepth--
+        if (gestureDepth == 0) {
+            try {
+                controller.endEdit()
+            } finally {
+                _ui.update { it.copy(gestureOpen = false) }
+            }
+        }
+    }
 
     init {
         scope.launch {
@@ -94,10 +125,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     // ---- actions -------------------------------------------------------------------------
 
     fun onBandDragStart(index: Int) = guarded {
-        if (!dragOpen) {
-            controller.beginEdit()
-            dragOpen = true
-        }
+        beginGesture(Source.GRAPHIC)
         _ui.update { it.copy(draggingBand = index, lastTouchedBand = index) }
     }
 
@@ -119,10 +147,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     fun onBandDragEnd() {
         try {
             synchronized(lock) {
-                if (dragOpen) {
-                    dragOpen = false
-                    controller.endEdit()
-                }
+                endGesture(Source.GRAPHIC)
             }
         } catch (e: Exception) {
             if (!isCoreFailure(e)) throw e
@@ -137,16 +162,16 @@ class UiStateHolder(val runtime: EqRuntime) {
     // ---- parametric ----------------------------------------------------------------------
 
     fun selectBand(index: Int?) = guarded {
-        _ui.update { s -> s.copy(selectedBand = index?.takeIf { it in s.bands.indices }) }
+        _ui.update { s ->
+            // Out-of-range indices are ignored; null deselects.
+            if (index == null || index in s.bands.indices) s.copy(selectedBand = index) else s
+        }
         refreshCurve()
     }
 
     fun parametricGestureStart(index: Int) = guarded {
-        if (!parametricOpen) {
-            controller.beginEdit()
-            parametricOpen = true
-        }
-        _ui.update { it.copy(draggingBand = index, selectedBand = index, gestureOpen = true) }
+        beginGesture(Source.PARAMETRIC)
+        _ui.update { it.copy(draggingBand = index, selectedBand = index) }
     }
 
     /** [gainDb] null keeps the band's gain (pass filters have none). Values arrive snapped and clamped. */
@@ -168,16 +193,13 @@ class UiStateHolder(val runtime: EqRuntime) {
     fun parametricGestureEnd() {
         try {
             synchronized(lock) {
-                if (parametricOpen) {
-                    parametricOpen = false
-                    controller.endEdit()
-                }
+                endGesture(Source.PARAMETRIC)
             }
         } catch (e: Exception) {
             if (!isCoreFailure(e)) throw e
             fail()
         } finally {
-            _ui.update { it.copy(draggingBand = null, gestureOpen = false) }
+            _ui.update { it.copy(draggingBand = null) }
             republish()
             refreshCurve()
         }
@@ -198,6 +220,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun setMode(mode: EqMode) = guarded {
+        if (gestureDepth > 0) return@guarded
         edited()
         controller.edit { it.setMode(mode) }
         republishLocked()
@@ -217,19 +240,13 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun preampDragStart() = guarded {
-        if (!preampDragOpen) {
-            controller.beginEdit()
-            preampDragOpen = true
-        }
+        beginGesture(Source.PREAMP)
     }
 
     fun preampDragEnd() {
         try {
             synchronized(lock) {
-                if (preampDragOpen) {
-                    preampDragOpen = false
-                    controller.endEdit()
-                }
+                endGesture(Source.PREAMP)
             }
         } catch (e: Exception) {
             if (!isCoreFailure(e)) throw e
@@ -274,12 +291,14 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun undo() = guarded {
+        if (gestureDepth > 0) return@guarded
         edited()
         controller.edit { it.undo() }
         republishLocked()
     }
 
     fun redo() = guarded {
+        if (gestureDepth > 0) return@guarded
         edited()
         controller.edit { it.redo() }
         republishLocked()
@@ -371,6 +390,7 @@ class UiStateHolder(val runtime: EqRuntime) {
                 globalMode = st.globalMode,
                 notice = st.notice,
                 lastTouchedBand = if (countChanged) null else base.lastTouchedBand,
+                selectedBand = base.selectedBand?.takeIf { snap.mode == EqMode.PARAMETRIC && it < snap.bands.size },
             )
         }
     }
