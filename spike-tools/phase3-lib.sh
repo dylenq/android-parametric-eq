@@ -61,3 +61,38 @@ set_state() {  # set_state <gain> <preamp> <mode> <global> <boot> <bypass>
   cmd --es cmd set-start-on-boot --es value "$5"
   cmd --es cmd set-bypass --es value "$6"
 }
+
+# capture_restart_evidence <label> : dumps restart-relevant system state for the package (read-only)
+capture_restart_evidence() {
+  local label="$1"
+  say "--- dumpsys evidence ($label): activity services"
+  "$ADB" shell dumpsys activity services "$PKG" 2>&1 | tr -d '\r' >&2 || true
+  say "--- dumpsys evidence ($label): activity processes (restart lines)"
+  "$ADB" shell dumpsys activity processes "$PKG" 2>&1 | tr -d '\r' | grep -iE 'restart|crash|backoff|bad|killed' >&2 || true
+  say "--- logcat crash buffer and AndroidRuntime evidence ($label)"
+  "$ADB" logcat -d -b crash 2>&1 | tr -d '\r' | grep -v '^---' >&2 || true
+  "$ADB" logcat -d -s AndroidRuntime:E 2>&1 | tr -d '\r' | grep -v '^---' | head -60 >&2 || true
+  say "--- logcat ActivityManager evidence ($label)"
+  "$ADB" logcat -d -s ActivityManager:I 2>&1 | tr -d '\r' | grep "$PKG" | grep -iE 'restart|Scheduling|crash|killed|died|Process .* has died' >&2 || true
+}
+
+# classify_restart <old_pid> : prints exactly one class. Reads live state plus the captured text in $RESTART_EVIDENCE_FILE.
+classify_restart() {
+  local old="$1" new ev
+  new=$(pid_of)
+  if [ -n "$new" ] && [ "$new" != "$old" ] && is_fg; then echo RESTARTED_STICKY; return 0; fi
+  ev=$( { "$ADB" shell dumpsys activity services "$PKG" 2>&1; "$ADB" logcat -d -s ActivityManager:I 2>&1 | grep "$PKG"; } | tr -d '\r' || true)
+  if echo "$ev" | grep -qiE 'restartDelay|nextRestartTime|Scheduling restart|scheduled restart|crashCount=[1-9]|restarting|mRestartCount=[1-9]|backoff'; then
+    echo NOT_RESTARTED_BACKOFF
+  else
+    echo NOT_RESTARTED_OTHER
+  fi
+  return 0
+}
+
+# restart_delay_detail : the restart delay lines currently visible in dumpsys, or "none"
+restart_delay_detail() {
+  local d
+  d=$("$ADB" shell dumpsys activity services "$PKG" 2>&1 | tr -d '\r' | grep -iE 'restartDelay|nextRestartTime|restartCount|crashCount|scheduled' | tr -s ' ' | tr '\n' ';' || true)
+  echo "${d:-none}"
+}
