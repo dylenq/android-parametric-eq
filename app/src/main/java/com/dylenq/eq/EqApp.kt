@@ -19,7 +19,7 @@ class EqApp : Application() {
     fun runtime(): EqRuntime {
         current?.let { return it }
         synchronized(this) {
-            return current ?: EqRuntime().also { current = it }
+            return current ?: EqRuntime.create(this).also { current = it }
         }
     }
 

@@ -4,6 +4,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.dylenq.eq.EqApp
 import com.dylenq.eq.EqRuntime
 import com.dylenq.eq.service.EffectFactory
+import com.dylenq.eq.service.SettingsStore
 import java.io.File
 import org.junit.rules.TestRule
 import org.junit.runner.Description
@@ -20,6 +21,9 @@ class RuntimeRule(private val factoryProvider: () -> EffectFactory = { FakeEffec
         private set
     lateinit var dir: File
         private set
+    lateinit var settings: SettingsStore
+        private set
+    private var prefsName = ""
 
     @Suppress("UNCHECKED_CAST")
     fun <T : EffectFactory> factoryAs(): T = factory as T
@@ -31,7 +35,9 @@ class RuntimeRule(private val factoryProvider: () -> EffectFactory = { FakeEffec
             val previous = app.peekRuntime()
             dir = File(ctx.cacheDir, "rt-${System.nanoTime()}").also { it.mkdirs() }
             factory = factoryProvider()
-            runtime = EqRuntime(factory, dir)
+            prefsName = "eq_settings_test_${System.nanoTime()}"
+            settings = SettingsStore(ctx, prefsName)
+            runtime = EqRuntime(factory, dir, settings)
             app.installForTest(runtime)
             try {
                 base.evaluate()
@@ -39,6 +45,7 @@ class RuntimeRule(private val factoryProvider: () -> EffectFactory = { FakeEffec
                 runtime.shutdown()
                 app.installForTest(previous)
                 dir.deleteRecursively()
+                ctx.deleteSharedPreferences(prefsName)
             }
         }
     }
