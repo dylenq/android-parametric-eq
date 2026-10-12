@@ -15,6 +15,11 @@
             </intent-filter>
         </activity>
 
+        <!-- Spike-only: exported so the host can drive it with am startservice. -->
+        <service
+            android:name=".spike.SpikeListenerService"
+            android:exported="true" />
+
         <receiver
             android:name=".spike.SpikeReceiver"
             android:exported="true">

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Spike-only stand-in for a media player. Never part of a release artifact. -->
+    <application
+        android:allowBackup="false"
+        android:label="playerstub">
+        <receiver
+            android:name=".TriggerReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.dylenq.playerstub.SEND" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "eq-android"
 include(":app")
+include(":playerstub")
