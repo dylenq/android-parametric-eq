@@ -54,4 +54,37 @@ object AxisScale {
 
     /** Ten labels, or three at font scale above 1.3. */
     fun frequencyLabels(fontScale: Float): List<Float> = if (fontScale > 1.3f) FEW_LABELS else ALL_LABELS
+
+    /**
+     * Collision handling for the x-axis labels. Returns the left x of each label, or null when it is
+     * dropped. Positions follow the canvas: the 20 Hz label starts at [plotLeft], the 20 kHz label ends
+     * at [plotRight], the rest are centred on their frequency. The two end labels are always kept (the
+     * range must stay readable); every other label is kept, left to right, only if it clears everything
+     * already kept by [minGap]. So at narrow widths "10k" is dropped rather than touching "20k".
+     */
+    fun frequencyLabelXs(
+        freqs: List<Float>,
+        widths: List<Float>,
+        plotLeft: Float,
+        plotRight: Float,
+        minGap: Float,
+    ): List<Float?> {
+        require(freqs.size == widths.size)
+        val span = plotRight - plotLeft
+        val xs = freqs.indices.map { i ->
+            val f = freqs[i]
+            when {
+                f <= MIN_HZ -> plotLeft
+                f >= MAX_HZ -> plotRight - widths[i]
+                else -> plotLeft + xFraction(f) * span - widths[i] / 2f
+            }
+        }
+        val keep = BooleanArray(freqs.size)
+        fun clear(i: Int) = freqs.indices.none { j ->
+            keep[j] && j != i && xs[i] < xs[j] + widths[j] + minGap && xs[j] < xs[i] + widths[i] + minGap
+        }
+        for (i in freqs.indices) if (freqs[i] <= MIN_HZ || freqs[i] >= MAX_HZ) keep[i] = true
+        for (i in freqs.indices) if (!keep[i] && clear(i)) keep[i] = true
+        return freqs.indices.map { if (keep[it]) xs[it] else null }
+    }
 }

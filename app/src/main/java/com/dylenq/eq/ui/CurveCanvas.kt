@@ -103,6 +103,12 @@ fun CurveCanvas(
             val dashClip = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 4.dp.toPx()))
             val hair = 1.dp.toPx()
             val plotHeightDp = plot.height / density
+            // Labels that would touch a neighbour (10k against 20k at 360 dp) are dropped, not overlapped.
+            val labelXs = AxisScale.frequencyLabelXs(
+                freqLabels.map { it.first },
+                freqLabels.map { it.second.size.width.toFloat() },
+                plot.left, plot.right, 4.dp.toPx(),
+            )
 
             onDrawBehind {
                 val s = state()
@@ -139,13 +145,9 @@ fun CurveCanvas(
                         topLeft = Offset(plot.left - 4.dp.toPx() - layout.size.width, py(db.toFloat()) - layout.size.height / 2f),
                     )
                 }
-                for ((f, layout) in freqLabels) {
-                    val x = when {
-                        f <= AxisScale.MIN_HZ -> plot.left
-                        f >= AxisScale.MAX_HZ -> plot.right - layout.size.width
-                        else -> px(f) - layout.size.width / 2f
-                    }
-                    drawText(layout, topLeft = Offset(x, plot.bottom + 4.dp.toPx()))
+                for (i in freqLabels.indices) {
+                    val x = labelXs[i] ?: continue
+                    drawText(freqLabels[i].second, topLeft = Offset(x, plot.bottom + 4.dp.toPx()))
                 }
             }
         },
