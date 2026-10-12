@@ -49,6 +49,8 @@ abstract class CurveTestBase {
     protected val pinchCompleted = AtomicInteger()
     protected val haptics = FakeHaptics()
 
+    protected fun dp(v: Float) = v * density
+
     @Before fun parametricMode() {
         controller.edit { it.setMode(EqMode.PARAMETRIC) }
     }

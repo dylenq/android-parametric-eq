@@ -155,7 +155,7 @@ private suspend fun AwaitPointerEventScope.runGesture(m: MachineInputs) {
             }
             PendingKind.SECOND -> {
                 m.tap.valid = false
-                consumeUntilUp()
+                pinch(m, gate, outcome.event!!, plot)
             }
         }
     } finally {
@@ -192,8 +192,8 @@ private suspend fun AwaitPointerEventScope.drag(
         change.consume()
         val ev = awaitPointerEvent(PointerEventPass.Main)
         if (ev.changes.count { it.pressed } >= 2) {
-            ev.changes.forEach { it.consume() }
-            consumeUntilUp()
+            // Drag turns into a pinch: same undo group, node frozen where it is.
+            pinch(m, gate, ev, plot)
             return
         }
         val c = ev.changes.firstOrNull { it.id == down.id } ?: return
@@ -203,6 +203,79 @@ private suspend fun AwaitPointerEventScope.drag(
         }
         change = c
     }
+}
+
+/**
+ * Two-finger pinch for Q from the first event with two pressed pointers until the pair breaks, then the
+ * survivor is ignored until all fingers are up (a resumed drag would teleport the node). Every event is
+ * consumed. The target band is resolved once; with none, the pinch is consumed but changes nothing.
+ */
+private suspend fun AwaitPointerEventScope.pinch(
+    m: MachineInputs,
+    gate: GestureGate,
+    start: PointerEvent,
+    plot: Rect,
+) {
+    start.changes.forEach { it.consume() }
+    val pressed = start.changes.filter { it.pressed }
+    val idA = pressed[0].id
+    val idB = pressed[1].id
+    val startDistance = (pressed[0].position - pressed[1].position).getDistance()
+    val centroid = (pressed[0].position + pressed[1].position) / 2f
+    val list = m.bands()
+    val w = m.yWindow()
+    val nodes = list.map { ParametricMath.nodePosition(it.freq, it.gainDb, it.kind.hasGain(), plot, w) }
+    val target = ParametricMath.pinchTarget(
+        nodes, centroid, m.selected(), ParametricMath.PINCH_CENTROID_RADIUS_DP * density,
+    )?.takeIf { it in list.indices }
+    var changed = false
+    var allUp = false
+    try {
+        if (target != null) {
+            m.onSelect(target)
+            val q0 = list[target].q
+            var lastQ = q0
+            var limitFired = false
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Main)
+                ev.changes.forEach { it.consume() }
+                val a = ev.changes.firstOrNull { it.id == idA }
+                val b = ev.changes.firstOrNull { it.id == idB }
+                if (a == null || b == null || !a.pressed || !b.pressed) {
+                    allUp = ev.changes.none { it.pressed }
+                    break
+                }
+                val q = ParametricMath.qAfterPinch(q0, startDistance, (a.position - b.position).getDistance())
+                if (q != lastQ) {
+                    if (!gate.open) {
+                        gate.open = true
+                        m.onDragStart(target)
+                    }
+                    m.onQChange(target, q)
+                    lastQ = q
+                    changed = true
+                    if (!limitFired && (q <= ParametricMath.MIN_Q || q >= ParametricMath.MAX_Q)) {
+                        limitFired = true
+                        m.haptics.value.reject()
+                    }
+                }
+            }
+        } else {
+            while (true) {
+                val ev = awaitPointerEvent(PointerEventPass.Main)
+                ev.changes.forEach { it.consume() }
+                val a = ev.changes.firstOrNull { it.id == idA }
+                val b = ev.changes.firstOrNull { it.id == idB }
+                if (a == null || b == null || !a.pressed || !b.pressed) {
+                    allUp = ev.changes.none { it.pressed }
+                    break
+                }
+            }
+        }
+    } finally {
+        if (changed) m.onPinchCompleted()
+    }
+    if (!allUp) consumeUntilUp()
 }
 
 /**
