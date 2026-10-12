@@ -10,3 +10,4 @@ app/src/main/jniLibs/
 .idea/
 __pycache__/
 .planning/state.json
+core/tools/golden-gen/target/

@@ -1,0 +1,14 @@
+[package]
+name = "golden-gen"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Standalone: not part of the eq-android workspace.
+[workspace]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Needed only because the unmodified macOS state.rs references dirs.
+dirs = "7"
