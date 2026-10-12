@@ -1,0 +1,5 @@
+[bindings.kotlin]
+package_name = "com.dylenq.eq.core"
+cdylib_name = "eq_core"
+android = true
+generate_immutable_records = true

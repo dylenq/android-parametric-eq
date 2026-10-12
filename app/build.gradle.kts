@@ -1,3 +1,7 @@
+import java.io.File
+import javax.inject.Inject
+import org.gradle.process.ExecOperations
+
 plugins {
     id("com.android.application")
 }
@@ -5,6 +9,7 @@ plugins {
 android {
     namespace = "com.dylenq.eq"
     compileSdk = 37
+    ndkVersion = "27.1.12297006"
 
     defaultConfig {
         applicationId = "com.dylenq.eq"
@@ -13,6 +18,9 @@ android {
         versionCode = 1
         versionName = "0.0.1-spike"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64", "armeabi-v7a")
+        }
     }
 
     compileOptions {
@@ -21,7 +29,107 @@ android {
     }
 }
 
+// Studio-launched Gradle has no cargo on PATH; look in the usual toolchain dirs.
+fun cargoBinDirs(): List<String> {
+    val home = System.getProperty("user.home")
+    return listOf(
+        "$home/.cargo/bin",
+        "$home/.rustup/toolchains/stable-aarch64-apple-darwin/bin",
+        "$home/.rustup/toolchains/stable-x86_64-apple-darwin/bin",
+    )
+}
+
+fun cargoExecutable(): String =
+    cargoBinDirs().map { File(it, "cargo") }.firstOrNull { it.canExecute() }?.absolutePath
+        ?: error("cargo not found in ${cargoBinDirs()}")
+
+fun cargoPath(): String = cargoBinDirs().joinToString(":") + ":" + (System.getenv("PATH") ?: "")
+
+abstract class CargoNdkTask : DefaultTask() {
+    @get:Inject abstract val exec: ExecOperations
+    @get:Input abstract val cargo: Property<String>
+    @get:Internal abstract val searchPath: Property<String>
+    @get:InputFiles @get:PathSensitive(PathSensitivity.RELATIVE) abstract val rustInputs: ConfigurableFileCollection
+    @get:Input abstract val ndkHome: Property<String>
+    @get:Internal abstract val repoRoot: DirectoryProperty
+    @get:OutputDirectory abstract val jniOut: DirectoryProperty
+
+    @TaskAction
+    fun run() {
+        exec.exec {
+            workingDir = repoRoot.get().asFile
+            environment("ANDROID_NDK_HOME", ndkHome.get())
+            environment("PATH", searchPath.get())
+            commandLine(
+                cargo.get(), "ndk",
+                "-t", "arm64-v8a", "-t", "x86_64", "-t", "armeabi-v7a",
+                "-P", "28", "-o", jniOut.get().asFile.absolutePath,
+                "build", "--release", "-p", "eq-core",
+            )
+        }
+    }
+}
+
+abstract class BindgenTask : DefaultTask() {
+    @get:Inject abstract val exec: ExecOperations
+    @get:Input abstract val cargo: Property<String>
+    @get:Internal abstract val searchPath: Property<String>
+    @get:InputFile @get:PathSensitive(PathSensitivity.NAME_ONLY) abstract val library: RegularFileProperty
+    @get:InputFile @get:PathSensitive(PathSensitivity.NAME_ONLY) abstract val uniffiToml: RegularFileProperty
+    @get:Internal abstract val repoRoot: DirectoryProperty
+    @get:OutputDirectory abstract val outDir: DirectoryProperty
+
+    @TaskAction
+    fun run() {
+        exec.exec {
+            workingDir = repoRoot.get().asFile
+            environment("PATH", searchPath.get())
+            commandLine(
+                cargo.get(), "run", "--release", "-p", "uniffi-bindgen", "--",
+                "generate", "--library", library.get().asFile.absolutePath,
+                "--language", "kotlin", "--no-format",
+                "--out-dir", outDir.get().asFile.absolutePath,
+            )
+        }
+    }
+}
+
+val repoRootDir = rootProject.layout.projectDirectory
+
+val cargoNdk = tasks.register<CargoNdkTask>("cargoNdkEqCore") {
+    rustInputs.from(
+        repoRootDir.dir("core/src"),
+        repoRootDir.file("core/Cargo.toml"),
+        repoRootDir.file("core/uniffi.toml"),
+        repoRootDir.file("Cargo.toml"),
+        repoRootDir.file("Cargo.lock"),
+    )
+    cargo.set(provider { cargoExecutable() })
+    searchPath.set(provider { cargoPath() })
+    ndkHome.set(androidComponents.sdkComponents.ndkDirectory.map { it.asFile.absolutePath })
+    repoRoot.set(repoRootDir)
+    jniOut.set(layout.buildDirectory.dir("generated/eq-core/jniLibs"))
+}
+
+val uniffiBindings = tasks.register<BindgenTask>("uniffiBindingsEqCore") {
+    cargo.set(provider { cargoExecutable() })
+    searchPath.set(provider { cargoPath() })
+    library.set(cargoNdk.flatMap { it.jniOut.file("arm64-v8a/libeq_core.so") })
+    uniffiToml.set(repoRootDir.file("core/uniffi.toml"))
+    repoRoot.set(repoRootDir)
+    outDir.set(layout.buildDirectory.dir("generated/eq-core/kotlin"))
+}
+
+androidComponents {
+    onVariants { variant ->
+        variant.sources.jniLibs?.addGeneratedSourceDirectory(cargoNdk, CargoNdkTask::jniOut)
+        variant.sources.kotlin?.addGeneratedSourceDirectory(uniffiBindings, BindgenTask::outDir)
+    }
+}
+
 dependencies {
+    implementation("net.java.dev.jna:jna:5.19.1@aar")
+    implementation("androidx.annotation:annotation:1.9.1")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:rules:1.7.0")
