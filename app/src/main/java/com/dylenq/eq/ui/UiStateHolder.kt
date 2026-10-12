@@ -11,6 +11,8 @@ import com.dylenq.eq.core.InternalException
 import com.dylenq.eq.core.Snapshot
 import com.dylenq.eq.service.ServiceStatus
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -325,8 +327,133 @@ class UiStateHolder(val runtime: EqRuntime) {
         republishLocked()
     }
 
-    /** Zeroes every graphic gain of the current band count and the preamp, as one undo step. */
+    // ---- parametric band actions (shared by the menu, the band list and the TalkBack actions) ----
+
+    /**
+     * Runs [block] as one undo step, composed with any open gesture through the shared counter.
+     * Index parameters of the callers are validated against the current band list first (T-05-10).
+     */
+    private inline fun step(block: () -> Unit) {
+        beginGesture(Source.ADD)
+        try {
+            block()
+        } finally {
+            endGesture(Source.ADD)
+        }
+    }
+
+    private fun bandAt(index: Int): Band? = controller.snapshot().bands.getOrNull(index)
+
+    private fun writeBand(index: Int, next: Band) {
+        edited()
+        step { controller.edit { it.setBand(index.toUInt(), next) } }
+        republishLocked()
+    }
+
+    /** Changes the filter kind only; frequency, Q, stored gain and enabled stay. */
+    fun setBandKind(index: Int, kind: FilterKind) = guarded {
+        val band = bandAt(index) ?: return@guarded
+        if (band.kind == kind) return@guarded
+        writeBand(index, band.copy(kind = kind))
+    }
+
+    fun setBandEnabled(index: Int, on: Boolean) = guarded {
+        val band = bandAt(index) ?: return@guarded
+        if (band.enabled == on) return@guarded
+        writeBand(index, band.copy(enabled = on))
+    }
+
+    /** Deletes band [index] ("Band N deleted", undoable). Selection follows the list. */
+    fun removeBand(index: Int) = guarded {
+        if (bandAt(index) == null) return@guarded
+        edited()
+        step { controller.edit { it.removeBand(index.toUInt()) } }
+        _ui.update { s ->
+            val sel = s.selectedBand
+            s.copy(selectedBand = when {
+                sel == null -> null
+                sel == index -> null
+                sel > index -> sel - 1
+                else -> sel
+            })
+        }
+        republishLocked()
+        _messages.tryEmit(UiMessage("Band ${index + 1} deleted", undoable = true))
+    }
+
+    /** Empties the band list in one undo step ("All bands removed", undoable). */
+    fun removeAllBands() = guarded {
+        val n = controller.snapshot().bands.size
+        if (n == 0) return@guarded
+        edited()
+        step { controller.edit { c -> repeat(n) { c.removeBand(0u) } } }
+        _ui.update { it.copy(selectedBand = null) }
+        republishLocked()
+        _messages.tryEmit(UiMessage("All bands removed", undoable = true))
+    }
+
+    /** Band list "Add band": a Peak, Q 1.00, 0 dB at the first free frequency, selected. One undo step. */
+    fun addBandFromList() = guarded {
+        val bands = controller.snapshot().bands
+        if (bands.size >= ParametricMath.MAX_BANDS) {
+            _messages.tryEmit(UiMessage("All 16 bands are in use. Remove one to add another."))
+            return@guarded
+        }
+        val freq = ParametricMath.nextFreeFrequency(bands.map { it.freq to it.enabled })
+        edited()
+        var index = -1
+        step {
+            controller.edit { c ->
+                val i = c.addBand().toInt()
+                index = i
+                c.setBand(i.toUInt(), Band(FilterKind.PEAK, freq, 0f, 1.0f, true))
+            }
+        }
+        republishLocked()
+        if (index >= 0) _ui.update { s -> if (index in s.bands.indices) s.copy(selectedBand = index) else s }
+    }
+
+    /** Moves band [index] by [steps] twelfths of an octave (negative = down). */
+    fun nudgeBandFrequency(index: Int, steps: Int) = guarded {
+        val band = bandAt(index) ?: return@guarded
+        val hz = band.freq * 2.0.pow(steps / 12.0).toFloat()
+        val next = ParametricMath.snapHz(hz)
+        if (next == band.freq) return@guarded
+        writeBand(index, band.copy(freq = next))
+    }
+
+    /** Moves the gain of band [index] by [deltaDb] (+-0.5 for the TalkBack actions). */
+    fun nudgeBandGain(index: Int, deltaDb: Float) = guarded {
+        val band = bandAt(index) ?: return@guarded
+        if (!band.kind.hasGain() || !deltaDb.isFinite()) return@guarded
+        val next = ParametricMath.snapDb(band.gainDb + deltaDb)
+        if (next == band.gainDb) return@guarded
+        writeBand(index, band.copy(gainDb = next))
+    }
+
+    /** Multiplies the Q of band [index] by [factor] (1.12 or 1/1.12), inside 0.1..18, rounded to 0.01. */
+    fun scaleBandQ(index: Int, factor: Float) = guarded {
+        val band = bandAt(index) ?: return@guarded
+        if (!factor.isFinite() || factor <= 0f) return@guarded
+        val q = (((band.q * factor).coerceIn(ParametricMath.MIN_Q, ParametricMath.MAX_Q)) * 100f).roundToInt() / 100f
+        val next = q.coerceIn(ParametricMath.MIN_Q, ParametricMath.MAX_Q)
+        if (next == band.q) return@guarded
+        writeBand(index, band.copy(q = next))
+    }
+
+    /** Parametric: default seven bands and preamp 0 as one step. Graphic: zeroes the graphic gains and the preamp. */
     fun resetAll() = guarded {
+        if (_ui.value.mode == EqMode.PARAMETRIC) {
+            val before = controller.snapshot()
+            controller.resetBands()
+            val after = controller.snapshot()
+            if (before.bands == after.bands && before.preampDb == after.preampDb) return@guarded
+            edited()
+            _ui.update { it.copy(selectedBand = null) }
+            republishLocked()
+            _messages.tryEmit(UiMessage("Bands and preamp reset", undoable = true))
+            return@guarded
+        }
         val s = _ui.value
         if (s.graphicGainsDb.all { it == 0f } && s.preampDb == 0f) return@guarded
         edited()
