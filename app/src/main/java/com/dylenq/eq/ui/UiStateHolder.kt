@@ -6,6 +6,7 @@ import com.dylenq.eq.EqRuntime
 import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.EqException
 import com.dylenq.eq.core.EqMode
+import com.dylenq.eq.core.FilterKind
 import com.dylenq.eq.core.InternalException
 import com.dylenq.eq.core.Snapshot
 import com.dylenq.eq.service.ServiceStatus
@@ -56,6 +57,11 @@ class UiStateHolder(val runtime: EqRuntime) {
     /** One-shot error events ("Couldn't apply that change."); the UI shows a snackbar. */
     val errors: SharedFlow<String> = _errors.asSharedFlow()
 
+    private val _messages = MutableSharedFlow<UiMessage>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    /** One-shot informational messages (for example the 16-band limit); the screen shows a snackbar. */
+    val messages: SharedFlow<UiMessage> = _messages.asSharedFlow()
+
     private val _editSerial = MutableStateFlow(0)
 
     /**
@@ -76,7 +82,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     // make one step. Each source has its own flag so a double start or an unmatched end is harmless.
     // Guarded by [lock].
     private var gestureDepth = 0
-    private enum class Source { GRAPHIC, PREAMP, PARAMETRIC }
+    private enum class Source { GRAPHIC, PREAMP, PARAMETRIC, ADD }
     private val openSources = java.util.EnumSet.noneOf(Source::class.java)
 
     /** Opens [source]'s share of the group; a second start from the same source is ignored. */
@@ -188,6 +194,53 @@ class UiStateHolder(val runtime: EqRuntime) {
             }
         }
         refreshCurve()
+    }
+
+    /** Pinch: sets only the Q of band [index]; frequency, gain, kind and enabled stay. Inside a gesture. */
+    fun setBandQ(index: Int, q: Float) = guarded {
+        if (!q.isFinite()) return@guarded
+        val band = _ui.value.bands.getOrNull(index) ?: return@guarded
+        edited()
+        val next = band.copy(q = q.coerceIn(ParametricMath.MIN_Q, ParametricMath.MAX_Q))
+        controller.edit { it.setBand(index.toUInt(), next) }
+        _ui.update { s ->
+            if (index in s.bands.indices) {
+                s.copy(bands = s.bands.toMutableList().also { it[index] = next })
+            } else {
+                s
+            }
+        }
+        refreshCurve()
+    }
+
+    /**
+     * Double-tap add: a Peak, Q 1.0, enabled, at the (snapped) tapped frequency and gain, selected.
+     * One undo step, composed with any open gesture through the shared counter. At 16 bands nothing is
+     * added and [messages] gets the limit message.
+     */
+    fun addBandAt(freqHz: Float, gainDb: Float) = guarded {
+        if (!freqHz.isFinite() || !gainDb.isFinite()) return@guarded
+        if (controller.snapshot().bands.size >= ParametricMath.MAX_BANDS) {
+            _messages.tryEmit(UiMessage("All 16 bands are in use. Remove one to add another."))
+            return@guarded
+        }
+        edited()
+        var index = -1
+        beginGesture(Source.ADD)
+        try {
+            controller.edit { c ->
+                val i = c.addBand().toInt()
+                index = i
+                c.setBand(
+                    i.toUInt(),
+                    Band(FilterKind.PEAK, ParametricMath.snapHz(freqHz), ParametricMath.snapDb(gainDb), 1.0f, true),
+                )
+            }
+        } finally {
+            endGesture(Source.ADD)
+        }
+        republishLocked()
+        if (index >= 0) _ui.update { s -> if (index in s.bands.indices) s.copy(selectedBand = index) else s }
     }
 
     fun parametricGestureEnd() {

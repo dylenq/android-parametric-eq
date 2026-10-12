@@ -82,6 +82,9 @@ fun EqScreen(
             onDragStart = holder::parametricGestureStart,
             onNodeChange = holder::parametricNodeChange,
             onDragEnd = holder::parametricGestureEnd,
+            onAddBand = holder::addBandAt,
+            onQChange = holder::setBandQ,
+            onDeselect = { holder.selectBand(null) },
         )
     }
 

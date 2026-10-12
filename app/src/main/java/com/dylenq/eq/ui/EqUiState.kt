@@ -12,6 +12,9 @@ class CurvePoints(
     val achievedDb: FloatArray,
 )
 
+/** A one-shot message for the screen's snackbar (for example the 16-band limit). */
+data class UiMessage(val text: String, val undoable: Boolean = false)
+
 /** Everything the screen renders. Immutable; the holder publishes a fresh copy per change. */
 @Immutable
 data class EqUiState(

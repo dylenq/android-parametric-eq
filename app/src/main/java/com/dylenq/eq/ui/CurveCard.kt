@@ -82,6 +82,11 @@ class ParametricActions(
     val onDragStart: (Int) -> Unit,
     val onNodeChange: (index: Int, freqHz: Float, gainDb: Float?) -> Unit,
     val onDragEnd: () -> Unit,
+    val onAddBand: (freqHz: Float, gainDb: Float) -> Unit = { _, _ -> },
+    val onQChange: (index: Int, q: Float) -> Unit = { _, _ -> },
+    val onLongPress: (Int) -> Unit = {},
+    val onPinchCompleted: () -> Unit = {},
+    val onDeselect: () -> Unit = {},
 )
 
 /** What the card's chrome (legend, chip, caption, semantics) needs; equal values do not recompose. */
@@ -217,6 +222,11 @@ fun CurveCard(
                         onDragStart = parametric.onDragStart,
                         onNodeChange = parametric.onNodeChange,
                         onDragEnd = parametric.onDragEnd,
+                        onAddBand = parametric.onAddBand,
+                        onQChange = parametric.onQChange,
+                        onLongPress = parametric.onLongPress,
+                        onPinchCompleted = parametric.onPinchCompleted,
+                        onDeselect = parametric.onDeselect,
                         modifier = Modifier.matchParentSize(),
                     )
                 }

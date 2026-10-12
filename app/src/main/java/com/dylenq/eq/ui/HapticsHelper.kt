@@ -25,6 +25,10 @@ class Haptics(private val feedback: HapticFeedback) {
 
     fun dragEnd() = feedback.performHapticFeedback(HapticFeedbackType.GestureEnd)
 
+    fun confirm() = feedback.performHapticFeedback(HapticFeedbackType.Confirm)
+
+    fun reject() = feedback.performHapticFeedback(HapticFeedbackType.Reject)
+
     fun reset() = feedback.performHapticFeedback(HapticFeedbackType.Confirm)
 
     /** Haptics for a change from [old] to [new]: whole-dB ticks, or the zero detent. */
