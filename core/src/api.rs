@@ -39,7 +39,7 @@ pub struct EngineParams {
     pub cutoffs_hz: Vec<f32>,
     pub gains_db: Vec<f32>,
     pub input_gain_db: f32,
-    /// PROVISIONAL until the Phase 3 rig tunes it.
+    /// Verified on the emulator, see `headroom::LIMITER_VERIFIED`.
     pub limiter: LimiterParams,
     pub limiter_enabled: bool,
     pub bypass: bool,

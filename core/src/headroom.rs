@@ -6,19 +6,22 @@
 use crate::achieved::BinGains;
 use crate::grid::Grid;
 
-/// Limiter values are provisional until the Phase 3 Visualizer rig tunes them (assumption A4).
-/// Unverified until Phase 3.
-pub const LIMITER_VERIFIED: bool = false;
+/// The default limiter values were measured on the emulator (AOSP effect library) with the
+/// Phase 3 Visualizer rig: all 10 rows (2 frame durations x 5 levels) matched the threshold/ratio
+/// prediction within 0.01 dB, inside the 1.5 dB bound. See
+/// `.planning/phases/03-service-and-sessions/evidence/LIMITER-TABLE.md`. This says nothing about
+/// OEM vendor DSPs, and the limiter still does not stop peak clipping.
+pub const LIMITER_VERIFIED: bool = true;
 
 /// Lowest and highest preamp the suggestion may return (the UI preamp range is +/- MAX_GAIN_DB).
 pub const MIN_PREAMP_DB: f64 = -24.0;
 
 /// DynamicsProcessing limiter stage settings.
 ///
-/// PROVISIONAL (assumption A4, [`LIMITER_VERIFIED`] is false): derived from the AOSP source,
-/// where the limiter acts on a per-block RMS envelope and cannot prevent peak clipping. The
-/// preamp headroom from the achieved peak is the real clip defence. Tune with the Visualizer rig
-/// in Phase 3. There is deliberately no make-up gain.
+/// Verified on the emulator ([`LIMITER_VERIFIED`] is true, LIMITER-TABLE.md): the limiter acts
+/// on a per-block RMS envelope with threshold -6 dB and ratio 10 and cannot prevent peak
+/// clipping. The preamp headroom from the achieved peak is the real clip defence. There is
+/// deliberately no make-up gain.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct LimiterParams {
     pub link_group: u32,
@@ -157,7 +160,8 @@ mod tests {
     }
 
     #[test]
-    fn limiter_is_unverified() {
-        assert!(!LIMITER_VERIFIED);
+    fn limiter_is_verified_by_the_phase3_table() {
+        // Flipped only because LIMITER-TABLE.md shows every row within 1.5 dB.
+        assert!(LIMITER_VERIFIED);
     }
 }
