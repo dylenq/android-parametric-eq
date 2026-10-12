@@ -4,8 +4,10 @@ use std::sync::Arc;
 
 uniffi::setup_scaffolding!();
 
+pub mod achieved;
 pub mod dsp;
 pub mod graphic;
+pub mod grid;
 pub mod history;
 // Parser kept for presets (v2); not exported over FFI.
 #[allow(dead_code)]
