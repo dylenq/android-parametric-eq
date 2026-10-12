@@ -10,6 +10,8 @@ class CurvePoints(
     val freqsHz: FloatArray,
     val idealDb: FloatArray,
     val achievedDb: FloatArray,
+    /** The selected enabled band's own response (dB) on the same grid, or null (Parametric only). */
+    val selectedBandDb: FloatArray? = null,
 )
 
 /** A one-shot message for the screen's snackbar (for example the 16-band limit). */

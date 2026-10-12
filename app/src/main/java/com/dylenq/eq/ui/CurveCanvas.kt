@@ -131,6 +131,8 @@ fun CurveCanvas(
                                 Kind.ERROR -> error
                                 Kind.BYPASS -> bypassColor
                                 Kind.RING -> surface
+                                Kind.OVERLAY_LINE -> primary.copy(alpha = 0.5f)
+                                Kind.OVERLAY_FILL -> primary.copy(alpha = 0.08f)
                             }
                         }
                     }
@@ -152,7 +154,7 @@ fun CurveCanvas(
     )
 }
 
-private enum class Kind { PLOT_FILL, TARGET, ACTUAL, ERROR, BYPASS, RING }
+private enum class Kind { PLOT_FILL, TARGET, ACTUAL, ERROR, BYPASS, RING, OVERLAY_LINE, OVERLAY_FILL }
 
 private fun DrawScope.drawCurves(
     s: EqUiState,
@@ -202,6 +204,23 @@ private fun DrawScope.drawCurves(
             if (i == 0) target.moveTo(xs[i], y) else target.lineTo(xs[i], y)
         }
         drawPath(target, color(if (bypass) Kind.BYPASS else Kind.TARGET), style = Stroke(1.5.dp.toPx(), pathEffect = dashTarget))
+    }
+
+    // The selected band's own response sits beneath the Actual curve; no animation, it follows the state.
+    val overlay = curve.selectedBandDb
+    if (overlay != null && s.mode == EqMode.PARAMETRIC && !bypass && overlay.size == n) {
+        seg.reset()
+        seg.moveTo(xs[0], zeroY)
+        for (i in 0 until n) seg.lineTo(xs[i], py(overlay[i]))
+        seg.lineTo(xs[n - 1], zeroY)
+        seg.close()
+        drawPath(seg, color(Kind.OVERLAY_FILL))
+        seg.reset()
+        for (i in 0 until n) {
+            val y = py(overlay[i])
+            if (i == 0) seg.moveTo(xs[i], y) else seg.lineTo(xs[i], y)
+        }
+        drawPath(seg, color(Kind.OVERLAY_LINE), style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 
     val over = !bypass && CurveStats.isOver(s.headroomAfterPreampDb)

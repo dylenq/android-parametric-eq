@@ -397,13 +397,26 @@ class UiStateHolder(val runtime: EqRuntime) {
         refreshCurve()
     }
 
+    /** The selected enabled band's own response, or null; a failure here never blanks the main curve. */
+    private fun selectedBandOverlay(snap: Snapshot): FloatArray? {
+        val sel = _ui.value.selectedBand ?: return null
+        if (snap.mode != EqMode.PARAMETRIC || snap.bands.getOrNull(sel)?.enabled != true) return null
+        return try {
+            controller.bandResponse(sel.toUInt(), CURVE_POINTS.toUInt(), sampleRate)
+        } catch (e: Exception) {
+            if (!isCoreFailure(e)) throw e
+            null
+        }
+    }
+
     private fun computeCurve() {
         curveComputations.incrementAndGet()
         try {
             val snap = controller.snapshot()
             val d = controller.responseCurve(CURVE_POINTS.toUInt(), sampleRate, snap.frameDurationMs)
             val ep = controller.engineParams(sampleRate, snap.frameDurationMs)
-            val pts = CurvePoints(d.freqsHz.toFloatArray(), d.idealDb.toFloatArray(), d.achievedDb.toFloatArray())
+            val overlay = selectedBandOverlay(snap)
+            val pts = CurvePoints(d.freqsHz.toFloatArray(), d.idealDb.toFloatArray(), d.achievedDb.toFloatArray(), overlay)
             _ui.update {
                 it.copy(
                     curve = pts,
