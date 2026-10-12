@@ -116,3 +116,112 @@ pub struct Curve {
     pub bands: Vec<Band>,
     pub preamp_db: f32,
 }
+
+// ---- Android additions: graphic mode (not in the macOS app) ----
+
+pub const GRAPHIC_COUNTS: [u32; 4] = [5, 10, 15, 31];
+pub const GRAPHIC_MAX_DB: f32 = 24.0;
+
+/// Which editor drives the curve.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, uniffi::Enum)]
+pub enum EqMode {
+    Parametric,
+    #[default]
+    Graphic,
+}
+
+/// Why a graphic edit was refused.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum GraphicError {
+    #[error("band index out of range")]
+    BadIndex,
+    #[error("gain is not a finite number")]
+    NotFinite,
+    #[error("unsupported band count")]
+    BadCount,
+}
+
+/// Slider gains for the graphic EQ: one gain per ISO centre of `band_count`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, uniffi::Record)]
+pub struct GraphicState {
+    pub band_count: u32,
+    pub gains_db: Vec<f32>,
+}
+
+impl Default for GraphicState {
+    fn default() -> Self {
+        GraphicState {
+            band_count: 10,
+            gains_db: vec![0.0; 10],
+        }
+    }
+}
+
+impl GraphicState {
+    /// Sets one slider, clamped to +/-24 dB. Rejects bad indices and non-finite input.
+    pub fn set_gain(&mut self, index: usize, db: f32) -> Result<(), GraphicError> {
+        if !db.is_finite() {
+            return Err(GraphicError::NotFinite);
+        }
+        let slot = self.gains_db.get_mut(index).ok_or(GraphicError::BadIndex)?;
+        *slot = db.clamp(-GRAPHIC_MAX_DB, GRAPHIC_MAX_DB);
+        Ok(())
+    }
+
+    /// Switches to another band count, resampling the current curve.
+    pub fn set_band_count(&mut self, count: u32) -> Result<(), GraphicError> {
+        if !GRAPHIC_COUNTS.contains(&count) {
+            return Err(GraphicError::BadCount);
+        }
+        self.gains_db = crate::graphic::resample(self.band_count, &self.gains_db, count);
+        self.band_count = count;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn graphic_default_is_ten_flat_bands() {
+        let g = GraphicState::default();
+        assert_eq!((g.band_count, g.gains_db.len()), (10, 10));
+        assert_eq!(EqMode::default(), EqMode::Graphic);
+    }
+
+    #[test]
+    fn set_gain_clamps_and_rejects() {
+        let mut g = GraphicState::default();
+        g.set_gain(0, 99.0).unwrap();
+        g.set_gain(1, -99.0).unwrap();
+        assert_eq!((g.gains_db[0], g.gains_db[1]), (24.0, -24.0));
+        assert_eq!(g.set_gain(10, 1.0), Err(GraphicError::BadIndex));
+        assert_eq!(g.set_gain(0, f32::NAN), Err(GraphicError::NotFinite));
+        assert_eq!(g.set_gain(0, f32::INFINITY), Err(GraphicError::NotFinite));
+        assert_eq!(g.gains_db[0], 24.0);
+    }
+
+    #[test]
+    fn set_band_count_resamples_and_rejects_bad_counts() {
+        let mut g = GraphicState::default();
+        g.set_gain(3, 6.0).unwrap();
+        g.set_band_count(31).unwrap();
+        assert_eq!((g.band_count, g.gains_db.len()), (31, 31));
+        assert_eq!(g.set_band_count(7), Err(GraphicError::BadCount));
+        assert_eq!((g.band_count, g.gains_db.len()), (31, 31));
+        g.set_band_count(5).unwrap();
+        assert_eq!(g.gains_db.len(), 5);
+    }
+
+    #[test]
+    fn parametric_limits_match_macos() {
+        let mut b = Band::new(FilterKind::Peak, 5.0);
+        b.q = 100.0;
+        b.gain_db = -90.0;
+        b.clamp();
+        assert_eq!((b.freq, b.q, b.gain_db), (20.0, 18.0, -24.0));
+        assert_eq!(MAX_BANDS, 16);
+        assert!(EqState::default().can_add_band());
+    }
+}
