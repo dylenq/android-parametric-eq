@@ -46,9 +46,11 @@ class TracerTest {
         try {
             assertTrue("service did not attach within 5 s", poll(5000) { runtime.isAttached })
 
-            val core = runtime.core
-            core.setMode(EqMode.PARAMETRIC)
-            core.setBand(0u, Band(FilterKind.PEAK, 1000f, 6f, 4f, true))
+            val core = runtime.controller
+            core.edit {
+                it.setMode(EqMode.PARAMETRIC)
+                it.setBand(0u, Band(FilterKind.PEAK, 1000f, 6f, 4f, true))
+            }
 
             rig = ToneRig().also { it.start() }
             val session = rig.sessionId
