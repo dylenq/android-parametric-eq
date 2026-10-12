@@ -50,6 +50,18 @@ class UiStateHolder(val runtime: EqRuntime) {
     /** One-shot error events ("Couldn't apply that change."); the UI shows a snackbar. */
     val errors: SharedFlow<String> = _errors.asSharedFlow()
 
+    private val _editSerial = MutableStateFlow(0)
+
+    /**
+     * Counts user edits (every graphic/preamp/mode/band-count/limiter/bypass change, reset, undo and redo).
+     * The Reset all snackbar watches it so its Undo can never undo a later, unrelated edit.
+     */
+    val editSerial: StateFlow<Int> = _editSerial.asStateFlow()
+
+    private fun edited() {
+        _editSerial.update { it + 1 }
+    }
+
     /** Number of curve computations performed (tests check conflation). */
     internal val curveComputations = AtomicInteger()
 
@@ -89,6 +101,7 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     /** Clamps to the core limits; snapping to 0.5 dB and the zero detent belong to the slider. */
     fun onBandDragChange(index: Int, db: Float) = guarded {
+        edited()
         val v = db.coerceIn(-GRAPHIC_LIMIT_DB, GRAPHIC_LIMIT_DB)
         controller.edit { it.setGraphicGain(index.toUInt(), v) }
         _ui.update { s ->
@@ -120,27 +133,32 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun resetBand(index: Int) = guarded {
+        edited()
         controller.edit { it.setGraphicGain(index.toUInt(), 0f) }
         _ui.update { it.copy(lastTouchedBand = index) }
         republishLocked()
     }
 
     fun setBandCount(count: Int) = guarded {
+        edited()
         controller.edit { it.setGraphicBandCount(count.toUInt()) }
         _ui.update { it.copy(lastTouchedBand = null) }
         republishLocked()
     }
 
     fun setMode(mode: EqMode) = guarded {
+        edited()
         controller.edit { it.setMode(mode) }
         republishLocked()
     }
 
     fun setBypass(on: Boolean) = guarded {
+        edited()
         controller.setBypass(on)
     }
 
     fun setPreamp(db: Float) = guarded {
+        edited()
         val v = db.coerceIn(PREAMP_MIN_DB, PREAMP_MAX_DB)
         controller.edit { it.setPreamp(v) }
         _ui.update { it.copy(preampDb = v) }
@@ -174,12 +192,14 @@ class UiStateHolder(val runtime: EqRuntime) {
     fun resetPreamp() = setPreamp(0f)
 
     fun applySuggestedPreamp() = guarded {
+        edited()
         val s = _ui.value.suggestedPreampDb.coerceIn(PREAMP_MIN_DB, PREAMP_MAX_DB)
         controller.edit { it.setPreamp(s) }
         republishLocked()
     }
 
     fun setLimiter(on: Boolean) = guarded {
+        edited()
         controller.edit { it.setLimiterEnabled(on) }
         republishLocked()
     }
@@ -188,6 +208,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     fun resetAll() = guarded {
         val s = _ui.value
         if (s.graphicGainsDb.all { it == 0f } && s.preampDb == 0f) return@guarded
+        edited()
         controller.beginEdit()
         try {
             controller.edit { c ->
@@ -202,11 +223,13 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun undo() = guarded {
+        edited()
         controller.edit { it.undo() }
         republishLocked()
     }
 
     fun redo() = guarded {
+        edited()
         controller.edit { it.redo() }
         republishLocked()
     }

@@ -45,6 +45,18 @@ object GainFormat {
     }
 }
 
+/**
+ * Unsigned one-decimal magnitude for headroom, "over by" and caption texts ("3.5", "0.0"). The value is
+ * rounded to tenths first and printed from the integer, so a result of zero never carries a sign: -0.0f,
+ * -0.04f and 0.04f all print "0.0" (UI-SPEC: no sign at zero; the chip text has no sign of its own).
+ */
+object DbFormat {
+    fun magnitude(db: Float): String {
+        val t = abs((db * 10f).roundToInt())
+        return "${t / 10}.${t % 10}"
+    }
+}
+
 /** Spoken frequency, for content descriptions. */
 object FreqSpeech {
     fun format(hz: Float): String {

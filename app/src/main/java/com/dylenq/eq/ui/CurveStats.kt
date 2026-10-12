@@ -1,6 +1,5 @@
 package com.dylenq.eq.ui
 
-import java.util.Locale
 import kotlin.math.abs
 
 /** A value on the curve and the frequency where it occurs. */
@@ -51,7 +50,7 @@ object CurveStats {
     fun caption(freqs: FloatArray, ideal: FloatArray, achieved: FloatArray): String? {
         val d = maxDiff(freqs, ideal, achieved)
         if (!captionVisible(d.db)) return null
-        return "Actual differs from target by up to ${String.format(Locale.ROOT, "%.1f", d.db)} dB near ${FreqFormat.withUnit(d.hz)}."
+        return "Actual differs from target by up to ${DbFormat.magnitude(d.db)} dB near ${FreqFormat.withUnit(d.hz)}."
     }
 
     fun isOver(headroomDb: Float) = headroomDb < OVER_THRESHOLD_DB
@@ -59,9 +58,9 @@ object CurveStats {
     /** "Headroom 3.5 dB", or "Over by 2.5 dB" below -0.05 dB. */
     fun headroomText(headroomDb: Float): String =
         if (isOver(headroomDb)) {
-            "Over by ${String.format(Locale.ROOT, "%.1f", -headroomDb)} dB"
+            "Over by ${DbFormat.magnitude(-headroomDb)} dB"
         } else {
-            "Headroom ${String.format(Locale.ROOT, "%.1f", headroomDb.coerceAtLeast(0f))} dB"
+            "Headroom ${DbFormat.magnitude(headroomDb.coerceAtLeast(0f))} dB"
         }
 
     /** Index runs where achieved exceeds the clip level at -preamp. */

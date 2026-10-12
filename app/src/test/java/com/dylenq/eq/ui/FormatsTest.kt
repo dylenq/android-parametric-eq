@@ -66,4 +66,30 @@ class FormatsTest {
         assertEquals("plus 1 decibel", GainSpeech.format(1f))
         assertEquals("0 decibels", GainSpeech.format(-0.04f))
     }
+
+    @Test fun dbMagnitudeNeverPrintsANegativeZero() {
+        assertEquals("0.0", DbFormat.magnitude(0f))
+        assertEquals("0.0", DbFormat.magnitude(-0.0f))
+        assertEquals("0.0", DbFormat.magnitude(-0.04f))
+        assertEquals("0.0", DbFormat.magnitude(0.04f))
+        assertEquals("0.1", DbFormat.magnitude(-0.06f))
+        assertEquals("3.5", DbFormat.magnitude(3.5f))
+        assertEquals("12.0", DbFormat.magnitude(-12f))
+    }
+
+    @Test fun noFormatterPrintsANegativeZeroForAnyTinyValue() {
+        val tiny = listOf(-0.0f, 0.0f, -1e-9f, 1e-9f, -0.01f, -0.049f, 0.049f, -0.0499f)
+        for (v in tiny) {
+            assertEquals("gain $v", "0 dB", GainFormat.format(v))
+            assertEquals("speech $v", "0 decibels", GainSpeech.format(v))
+            assertEquals("magnitude $v", "0.0", DbFormat.magnitude(v))
+            assertEquals("speech magnitude $v", "0 decibels", GainSpeech.magnitude(v))
+            for (text in listOf(CurveStats.headroomText(v), CurveStats.headroomText(-v), overByText(v))) {
+                assertEquals("no minus in '$text'", false, text.contains("-") || text.contains("−"))
+            }
+        }
+        assertEquals("Headroom 0.0 dB", CurveStats.headroomText(-0.0f))
+    }
+
+    private fun overByText(v: Float) = "Over by ${overBy(v)} dB"
 }
