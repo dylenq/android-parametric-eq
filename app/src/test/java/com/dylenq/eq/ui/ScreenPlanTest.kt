@@ -71,4 +71,23 @@ class ScreenPlanTest {
         assertEquals(84f, curveChromeDp(1f, 360), 0.01f)
         assertEquals(132f, curveChromeDp(2f, 411), 0.01f)
     }
+
+    @Test fun tightAppliesToShortPortraitWindowsAtNormalFontOnly() {
+        assertTrue(WindowSpec(360, 800).tight)
+        assertTrue(WindowSpec(411, 879).tight)
+        assertFalse(WindowSpec(411, 891).tight)
+        assertFalse("large font scrolls instead", WindowSpec(360, 800, 1.3f).tight)
+        assertFalse("landscape has its own compact form", WindowSpec(800, 360).tight)
+        assertEquals(56, WindowSpec(360, 800).topBarHeightDp)
+        assertEquals(64, WindowSpec(411, 891).topBarHeightDp)
+    }
+
+    @Test fun tightPanelAndPlotFloorsAreAboveTheHardMinimums() {
+        assertEquals(186f, graphicPanelMinDp(1f, false, tight = true), 0.01f)
+        assertTrue(TIGHT_TRACK_DP >= 120f)
+        assertTrue(PLOT_MIN_TIGHT_DP >= 140f)
+        val p = planColumn(availDp = 680f, fixedDp = 300f, desiredPlotDp = 240f, contentMinDp = 186f, plotMinDp = PLOT_MIN_TIGHT_DP)
+        assertTrue(p.plotDp >= 140f)
+        assertFalse(p.scrolls)
+    }
 }

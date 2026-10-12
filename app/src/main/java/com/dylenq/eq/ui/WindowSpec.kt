@@ -5,6 +5,9 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 
+/** Portrait windows shorter than this use the tight column (see [WindowSpec.tight]). */
+const val TIGHT_HEIGHT_DP = 880
+
 /** Landscape, or at least this wide: two panes (UI-SPEC "Window classes"). */
 const val TWO_PANE_MIN_WIDTH_DP = 840
 
@@ -32,7 +35,14 @@ data class WindowSpec(val widthDp: Int, val heightDp: Int, val fontScale: Float 
 
     /** Single column content is capped at 640 dp and centred (600-839 dp portrait). */
     val maxContentWidthDp: Int get() = if (twoPane) Int.MAX_VALUE else 640
-    val topBarHeightDp: Int get() = if (twoPane) 56 else 64
+
+    /**
+     * A portrait window under [TIGHT_HEIGHT_DP] at normal font scale (360 x 800 is the case that drove it).
+     * The column then trades some air for fitting without scrolling: slimmer top bar, 130 dp slider tracks,
+     * a 140 dp plot floor and tighter preamp card padding. Touch targets stay at 48 dp or more.
+     */
+    val tight: Boolean get() = !twoPane && !largeFont && heightDp < TIGHT_HEIGHT_DP
+    val topBarHeightDp: Int get() = if (twoPane || tight) 56 else 64
 
     companion object {
         @Composable
@@ -47,6 +57,9 @@ data class WindowSpec(val widthDp: Int, val heightDp: Int, val fontScale: Float 
 data class ColumnPlan(val plotDp: Float, val contentDp: Float, val totalDp: Float, val scrolls: Boolean)
 
 const val PLOT_MIN_DP = 168f
+
+/** Plot floor of the tight column. */
+const val PLOT_MIN_TIGHT_DP = 140f
 const val CONTENT_MIN_DP = 216f
 const val COLUMN_GAP_DP = 12f
 
@@ -61,9 +74,10 @@ fun planColumn(
     desiredPlotDp: Float,
     gapDp: Float = COLUMN_GAP_DP,
     contentMinDp: Float = CONTENT_MIN_DP,
+    plotMinDp: Float = PLOT_MIN_DP,
 ): ColumnPlan {
     val room = availDp - fixedDp - 3 * gapDp
-    val plot = desiredPlotDp.coerceAtMost(room - contentMinDp).coerceAtLeast(PLOT_MIN_DP)
+    val plot = desiredPlotDp.coerceAtMost(room - contentMinDp).coerceAtLeast(plotMinDp)
     val content = maxOf(contentMinDp, room - plot)
     val total = fixedDp + 3 * gapDp + plot + content
     return ColumnPlan(plot, content, total, total > availDp + 0.5f)

@@ -91,6 +91,7 @@ fun EqScreen(
         ModeRow(ui.mode, ui.graphicBandCount, holder::setMode, holder::setBandCount, stacked = spec.stackedModeRow)
     }
     val modeContent: @Composable (Boolean) -> Unit = { compact ->
+        val tight = spec.tight && !compact
         // Phase 5 slot: ParametricBandList is `parametricContent`.
         Crossfade(
             targetState = ui.mode,
@@ -107,6 +108,7 @@ fun EqScreen(
                     onReset = holder::resetBand,
                     modifier = Modifier.fillMaxSize(),
                     compact = compact,
+                    tight = tight,
                     scroll = sliderScroll,
                 )
             } else {
@@ -124,6 +126,7 @@ fun EqScreen(
             onApplySuggested = holder::applySuggestedPreamp,
             onLimiter = holder::setLimiter,
             compact = compact,
+            tight = spec.tight && !compact,
         )
     }
 
@@ -154,7 +157,8 @@ fun EqScreen(
                             availablePx = constraints.maxHeight,
                             desiredPlotDp = defaultPlotHeight(spec.heightDp),
                             chromeDp = curveChromeDp(spec.fontScale, spec.widthDp),
-                            contentMinDp = graphicPanelMinDp(spec.fontScale, compact = false),
+                            contentMinDp = graphicPanelMinDp(spec.fontScale, compact = false, tight = spec.tight),
+                            plotMinDp = if (spec.tight) PLOT_MIN_TIGHT_DP else PLOT_MIN_DP,
                             modifier = Modifier.verticalScroll(scroll).testTag("eq-column"),
                             curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp)) },
                             mode = mode,
@@ -207,6 +211,7 @@ private fun SingleColumn(
     desiredPlotDp: Float,
     chromeDp: Float,
     contentMinDp: Float,
+    plotMinDp: Float,
     modifier: Modifier,
     curve: @Composable () -> Unit,
     mode: @Composable () -> Unit,
@@ -228,7 +233,7 @@ private fun SingleColumn(
         val modeP = measurables[1].measure(loose)
         val preampP = measurables[3].measure(loose)
         val fixedDp = (modeP.height + preampP.height) / d + chromeDp
-        val plan = planColumn(availablePx / d, fixedDp, desiredPlotDp, contentMinDp = contentMinDp)
+        val plan = planColumn(availablePx / d, fixedDp, desiredPlotDp, contentMinDp = contentMinDp, plotMinDp = plotMinDp)
         val gap = (COLUMN_GAP_DP * d).roundToInt()
         val minContentPx = (contentMinDp * d).roundToInt()
         var curveH = ((chromeDp + plan.plotDp) * d).roundToInt()

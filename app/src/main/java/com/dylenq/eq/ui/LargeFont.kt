@@ -24,16 +24,19 @@ fun TextStyle.capScale(max: Float = DENSE_LABEL_MAX_SCALE): TextStyle {
 /** Label row height in the slider panel: 20 dp, 28 dp at font scale >= 1.3. */
 fun sliderLabelRowDp(fontScale: Float) = if (fontScale >= 1.3f) 28f else 20f
 
+/** Slider track minimum of the tight portrait column (the hard floor is 120 dp). */
+const val TIGHT_TRACK_DP = 130f
+
 /**
  * Minimum height of the graphic slider panel (UI-SPEC: 232 -> measured 216 dp at 100%): card padding,
  * readout bar, label rows (two at large font: the gain labels join the frequency labels), the track
  * minimum and the label gap. [compact] is the landscape form (121 dp tracks, no vertical padding).
  */
-fun graphicPanelMinDp(fontScale: Float, compact: Boolean): Float {
+fun graphicPanelMinDp(fontScale: Float, compact: Boolean, tight: Boolean = false): Float {
     val fs = fontScale.coerceIn(1f, 2f)
     val readout = maxOf(24f, 20f * fs + 4f)
     val rows = if (fontScale >= 1.3f) 2 else 1
     val pad = if (compact) 0f else 8f
-    val track = if (compact) 121f else 160f
+    val track = if (compact) 121f else if (tight) TIGHT_TRACK_DP else 160f
     return pad + readout + track + rows * sliderLabelRowDp(fontScale) + 4f
 }

@@ -92,10 +92,12 @@ fun GraphicSliderPanel(
     modifier: Modifier = Modifier,
     /** Landscape form: tracks may shrink to 120 dp and the card has no vertical padding (168 dp minimum). */
     compact: Boolean = false,
+    /** Tight portrait window (360 x 800): tracks may shrink to 130 dp. */
+    tight: Boolean = false,
     /** Horizontal scroll of the slider row; hoisted by the screen so it survives Graphic -> Parametric -> Graphic. */
     scroll: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
 ) {
-    val minTrack = if (compact) MinTrackCompact else MinTrack
+    val minTrack = if (compact) MinTrackCompact else if (tight) TIGHT_TRACK_DP.dp else MinTrack
     val large = LocalDensity.current.fontScale >= 1.3f
     val labelRow = sliderLabelRowDp(LocalDensity.current.fontScale).dp
     val labelRows = if (large) 2 else 1

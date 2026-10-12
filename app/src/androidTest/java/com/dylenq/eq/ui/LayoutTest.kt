@@ -86,7 +86,31 @@ class LayoutTest {
         assertTrue("mode row inside the window: ${mode.bottom}", mode.bottom <= 800.dp)
         // Measured, not asserted (the spec's arithmetic does not close at 800 dp, see the summary).
         Log.i("EQ-LAYOUT", "360x800: curve=${curve.top}..${curve.bottom} mode=${mode.top}..${mode.bottom} limiter-bottom=${limiter.bottom} column-scroll-max=${verticalMax("eq-column")}")
-        assertTrue("slider panel keeps its 216 dp minimum", b("slider-row").height >= 160.dp)
+        assertTrue("tight column keeps 130 dp tracks (216 dp panel minimum applies above 880 dp): ${b("slider-row").height}", b("slider-row").height >= 128.dp)
+    }
+
+    /** UI-SPEC acceptance check 1: everything, limiter row included, visible at 360 x 800 dp with no banner. */
+    @Test fun portrait360x800WithNoBannerFitsEverythingWithoutScrolling() {
+        val spec = WindowSpec(360, 800)
+        hostScreen(spec)
+        compose.waitForIdle()
+        val statusText = node("status-text").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString { it.text }
+        val startShown = compose.onAllNodes(hasTestTag("status-start")).fetchSemanticsNodes().isNotEmpty()
+        Log.i("EQ-LAYOUT", "360x800 status strip shows '$statusText' start-button=$startShown")
+        val blocks = listOf("status-strip", "curve", "mode-row", "slider-row", "preamp-slider", "limiter-row")
+            .joinToString(" ") { "$it=${b(it).top.value.toInt()}..${b(it).bottom.value.toInt()}(h${b(it).height.value.toInt()})" }
+        val plot = b("curve").height.value
+        Log.i("EQ-LAYOUT", "360x800 no banner: $blocks plot=$plot track=${b("band-0").height} column-scroll-max-px=${verticalMax("eq-column")} limiter-bottom=${b("limiter-row").bottom}")
+        assertEquals("no vertical scrolling", 0f, verticalMax("eq-column"), 0f)
+        for (tag in listOf("curve", "mode-row", "slider-row", "preamp-slider", "limiter-row")) {
+            assertTrue("$tag inside the 800 dp window: ${b(tag)}", b(tag).bottom <= 800.dp)
+        }
+        assertTrue("plot >= 140 dp: $plot", plot >= 140f)
+        assertTrue("slider tracks >= 120 dp: ${b("band-0").height}", b("band-0").height >= 120.dp)
+        // The Material segmented buttons are 40 dp tall as shipped (not changed here); their row is 48 dp.
+        for (tag in listOf("equalizer-toggle", "mode-row", "band-count-slot", "preamp-pill", "limiter-row")) {
+            assertTrue("$tag touch target >= 48 dp: ${b(tag).height} x ${b(tag).width}", b(tag).height >= 47.5.dp)
+        }
     }
 
     @Test fun portrait411x891WithoutABannerFitsWithoutScrolling() {

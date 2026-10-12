@@ -92,6 +92,8 @@ fun PreampCard(
     onLimiter: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    /** Tight portrait window: half the vertical padding, so the limiter row fits at 360 x 800 dp. */
+    tight: Boolean = false,
 ) {
     val s = state()
     val haptics = rememberHaptics()
@@ -132,7 +134,7 @@ fun PreampCard(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        Column(Modifier.padding(horizontal = if (compact) 8.dp else 16.dp, vertical = if (compact) 4.dp else 8.dp)) {
+        Column(Modifier.padding(horizontal = if (compact) 8.dp else 16.dp, vertical = if (compact) 4.dp else if (tight) 4.dp else 8.dp)) {
             // Row 1: label, slider, value pill.
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp),
@@ -195,7 +197,7 @@ fun PreampCard(
             if (!compact || (!s.bypass && (showsSuggestion(s.suggestedPreampDb, s.preampDb) || s.headroomAfterPreampDb < -0.05f))) {
                 SuggestedRow(s, onApplySuggested, showHeadroom = !compact)
             }
-            LimiterRow(s.limiterEnabled, onLimiter, compact)
+            LimiterRow(s.limiterEnabled, onLimiter, compact || tight)
         }
     }
 }
