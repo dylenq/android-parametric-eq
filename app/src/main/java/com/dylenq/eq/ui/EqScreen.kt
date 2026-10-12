@@ -76,6 +76,15 @@ fun EqScreen(
     val reduced = rememberReducedMotion()
     val sliderScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
+    val parametricActions = remember(holder) {
+        ParametricActions(
+            onSelect = holder::selectBand,
+            onDragStart = holder::parametricGestureStart,
+            onNodeChange = holder::parametricNodeChange,
+            onDragEnd = holder::parametricGestureEnd,
+        )
+    }
+
     val strip: @Composable () -> Unit = { StatusStrip({ ui }, onStart = onStartService) }
     val banner: @Composable () -> Unit = {
         BannerSlot(
@@ -160,7 +169,7 @@ fun EqScreen(
                             contentMinDp = graphicPanelMinDp(spec.fontScale, compact = false, tight = spec.tight),
                             plotMinDp = if (spec.tight) PLOT_MIN_TIGHT_DP else PLOT_MIN_DP,
                             modifier = Modifier.verticalScroll(scroll).testTag("eq-column"),
-                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp)) },
+                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp), parametric = parametricActions) },
                             mode = mode,
                             content = { modeContent(false) },
                             preamp = { preamp(false) },
@@ -180,7 +189,7 @@ fun EqScreen(
                         slots = listOf(
                             strip,
                             banner,
-                            { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp)) },
+                            { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp), parametric = parametricActions) },
                             mode,
                         ),
                     )

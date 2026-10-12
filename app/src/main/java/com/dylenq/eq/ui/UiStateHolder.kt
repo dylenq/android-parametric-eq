@@ -3,6 +3,7 @@ package com.dylenq.eq.ui
 import android.media.AudioManager
 import android.media.AudioTrack
 import com.dylenq.eq.EqRuntime
+import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.EqException
 import com.dylenq.eq.core.EqMode
 import com.dylenq.eq.core.InternalException
@@ -67,6 +68,7 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     private var dragOpen = false
     private var preampDragOpen = false
+    private var parametricOpen = false
 
     init {
         scope.launch {
@@ -127,6 +129,55 @@ class UiStateHolder(val runtime: EqRuntime) {
             fail()
         } finally {
             _ui.update { it.copy(draggingBand = null) }
+            republish()
+            refreshCurve()
+        }
+    }
+
+    // ---- parametric ----------------------------------------------------------------------
+
+    fun selectBand(index: Int?) = guarded {
+        _ui.update { s -> s.copy(selectedBand = index?.takeIf { it in s.bands.indices }) }
+        refreshCurve()
+    }
+
+    fun parametricGestureStart(index: Int) = guarded {
+        if (!parametricOpen) {
+            controller.beginEdit()
+            parametricOpen = true
+        }
+        _ui.update { it.copy(draggingBand = index, selectedBand = index, gestureOpen = true) }
+    }
+
+    /** [gainDb] null keeps the band's gain (pass filters have none). Values arrive snapped and clamped. */
+    fun parametricNodeChange(index: Int, freqHz: Float, gainDb: Float?) = guarded {
+        val band = _ui.value.bands.getOrNull(index) ?: return@guarded
+        edited()
+        val next = band.copy(freq = freqHz, gainDb = gainDb ?: band.gainDb)
+        controller.edit { it.setBand(index.toUInt(), next) }
+        _ui.update { s ->
+            if (index in s.bands.indices) {
+                s.copy(bands = s.bands.toMutableList().also { it[index] = next })
+            } else {
+                s
+            }
+        }
+        refreshCurve()
+    }
+
+    fun parametricGestureEnd() {
+        try {
+            synchronized(lock) {
+                if (parametricOpen) {
+                    parametricOpen = false
+                    controller.endEdit()
+                }
+            }
+        } catch (e: Exception) {
+            if (!isCoreFailure(e)) throw e
+            fail()
+        } finally {
+            _ui.update { it.copy(draggingBand = null, gestureOpen = false) }
             republish()
             refreshCurve()
         }
@@ -309,6 +360,7 @@ class UiStateHolder(val runtime: EqRuntime) {
                 graphicGainsDb = snap.graphicGainsDb.toList(),
                 graphicCentresHz = snap.graphicCentresHz.toList(),
                 parametricEnabledCount = snap.bands.count { it.enabled },
+                bands = snap.bands,
                 preampDb = snap.preampDb,
                 limiterEnabled = snap.limiterEnabled,
                 canUndo = snap.canUndo,

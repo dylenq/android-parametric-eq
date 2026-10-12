@@ -1,6 +1,7 @@
 package com.dylenq.eq.ui
 
 import androidx.compose.runtime.Immutable
+import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.EqMode
 
 /** One response curve sampled on a log-frequency grid (dB per point). */
@@ -23,6 +24,12 @@ data class EqUiState(
     val graphicCentresHz: List<Float> = emptyList(),
     /** Enabled parametric bands (Phase 4 shows the placeholder text based on this). */
     val parametricEnabledCount: Int = 0,
+    /** Every parametric band in index order (enabled or not). */
+    val bands: List<Band> = emptyList(),
+    /** The selected parametric band, or null; cleared on leaving Parametric, never out of range. */
+    val selectedBand: Int? = null,
+    /** True while any gesture (graphic slider, preamp or parametric) holds an undo group open. */
+    val gestureOpen: Boolean = false,
     val preampDb: Float = 0f,
     val limiterEnabled: Boolean = true,
     /** Single source: the runtime status flow (shared with the notification action). */

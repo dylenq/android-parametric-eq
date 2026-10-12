@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import com.dylenq.eq.core.EqMode
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
@@ -73,6 +74,15 @@ internal fun curveFooterHeight(fontScale: Float, widthDp: Int) =
 /** Everything in the card except the plot, at this font scale and window width (dp). */
 internal fun curveChromeDp(fontScale: Float, widthDp: Int): Float =
     CurveCardTopPad.value + curveHeaderHeight(fontScale).value + curveFooterHeight(fontScale, widthDp).value
+
+/** The holder callbacks the Parametric interaction layer drives. */
+@Immutable
+class ParametricActions(
+    val onSelect: (Int) -> Unit,
+    val onDragStart: (Int) -> Unit,
+    val onNodeChange: (index: Int, freqHz: Float, gainDb: Float?) -> Unit,
+    val onDragEnd: () -> Unit,
+)
 
 /** What the card's chrome (legend, chip, caption, semantics) needs; equal values do not recompose. */
 @Immutable
@@ -132,6 +142,8 @@ fun CurveCard(
     fillHeight: Boolean = false,
     /** Footer height; the screen passes the value its chrome estimate used. */
     footerHeight: androidx.compose.ui.unit.Dp? = null,
+    /** Node editing callbacks; the interaction layer is hosted only in Parametric mode when set. */
+    parametric: ParametricActions? = null,
 ) {
     val view by remember(state) { derivedStateOf { CurveView.from(state()) } }
     val reduced = rememberReducedMotion()
@@ -139,12 +151,15 @@ fun CurveCard(
     // Y window: hysteresis decided here, animated below. Frozen while a slider is dragged.
     var window by remember { mutableIntStateOf(12) }
     val anim = remember { Animatable(12f) }
+    // Parametric uses a FIXED window (L-01): no hysteresis, no dwell, no mid-drag change.
+    val isParametric by remember(state) { derivedStateOf { state().mode == EqMode.PARAMETRIC } }
     LaunchedEffect(state) {
-        snapshotFlow { val s = state(); plottedMagnitude(s) to (s.draggingBand != null) }
-            .collect { (m, dragging) -> window = AxisScale.yWindow(window, m, dragging) }
+        snapshotFlow { val s = state(); Triple(plottedMagnitude(s), s.draggingBand != null, s.mode == EqMode.PARAMETRIC) }
+            .collect { (m, dragging, para) -> if (!para) window = AxisScale.yWindow(window, m, dragging) }
     }
-    LaunchedEffect(window, reduced) {
-        if (reduced) anim.snapTo(window.toFloat()) else anim.animateTo(window.toFloat(), tween(300, easing = EmphasizedEasing))
+    LaunchedEffect(window, isParametric, reduced) {
+        val target = if (isParametric) AxisScale.PARAMETRIC_Y_HALF_SPAN_DB else window.toFloat()
+        if (reduced) anim.snapTo(target) else anim.animateTo(target, tween(300, easing = EmphasizedEasing))
     }
 
     var showDialog by rememberSaveable { mutableStateOf(false) }
@@ -184,7 +199,7 @@ fun CurveCard(
                 CurveCanvas(
                     state = state,
                     yWindow = { anim.value },
-                    labelWindow = window,
+                    labelWindow = if (isParametric) AxisScale.PARAMETRIC_LABEL_WINDOW else window,
                     modifier = Modifier
                         .matchParentSize()
                         .testTag("curve")
@@ -193,6 +208,18 @@ fun CurveCard(
                             stateDescription = view.stateDescription
                         },
                 )
+                if (isParametric && parametric != null) {
+                    CurveInteractionLayer(
+                        bands = { state().bands },
+                        selected = { state().selectedBand },
+                        yWindow = { anim.value },
+                        onSelect = parametric.onSelect,
+                        onDragStart = parametric.onDragStart,
+                        onNodeChange = parametric.onNodeChange,
+                        onDragEnd = parametric.onDragEnd,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                }
                 if (view.bypass) {
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
