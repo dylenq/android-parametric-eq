@@ -64,6 +64,8 @@ internal const val PREAMP_MAX_DB = 6f
 /** Slider steps between the ends: 30 dB / 0.5 dB = 60 intervals, 59 interior stops. */
 internal const val PREAMP_STEPS = 59
 
+/** Shown in place of the headroom figure while the equalizer is bypassed. */
+const val BYPASSED_HEADROOM_TEXT = "Not applied while bypassed"
 const val LIMITER_DESCRIPTION = "Eases sustained loud sections. It can't catch short peaks."
 private val Tnum = TextStyle(fontFeatureSettings = "tnum")
 
@@ -190,7 +192,7 @@ fun PreampCard(
             }
 
             // Compact (landscape): two rows; the suggested row only appears when there is something to suggest.
-            if (!compact || showsSuggestion(s.suggestedPreampDb, s.preampDb) || s.headroomAfterPreampDb < -0.05f) {
+            if (!compact || (!s.bypass && (showsSuggestion(s.suggestedPreampDb, s.preampDb) || s.headroomAfterPreampDb < -0.05f))) {
                 SuggestedRow(s, onApplySuggested, showHeadroom = !compact)
             }
             LimiterRow(s.limiterEnabled, onLimiter, compact)
@@ -294,8 +296,10 @@ private fun PreampPill(preampDb: Float, onReset: () -> Unit) {
 /** Chip when a suggestion would change the preamp, else helper text; an over-the-limit error replaces the helper. */
 @Composable
 private fun SuggestedRow(s: EqUiState, onApply: () -> Unit, showHeadroom: Boolean = true) {
-    val chip = showsSuggestion(s.suggestedPreampDb, s.preampDb)
-    val over = s.headroomAfterPreampDb < -0.05f
+    // Bypassed: nothing is applied, so headroom, an over-the-limit error and a suggestion would all
+    // describe audio that is not being processed. The row keeps its height so the toggle never shifts layout.
+    val chip = !s.bypass && showsSuggestion(s.suggestedPreampDb, s.preampDb)
+    val over = !s.bypass && s.headroomAfterPreampDb < -0.05f
     Row(
         Modifier.fillMaxWidth().heightIn(min = 32.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -314,6 +318,13 @@ private fun SuggestedRow(s: EqUiState, onApply: () -> Unit, showHeadroom: Boolea
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.weight(1f).testTag("over-by"),
+            )
+        } else if (s.bypass && showHeadroom) {
+            Text(
+                BYPASSED_HEADROOM_TEXT,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("headroom-bypassed"),
             )
         } else if (!chip && showHeadroom) {
             Text(

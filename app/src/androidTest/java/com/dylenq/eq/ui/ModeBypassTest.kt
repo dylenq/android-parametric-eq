@@ -100,7 +100,7 @@ class ModeBypassTest {
         compose.waitForIdle()
         assertEquals("Parametric editing isn't available yet", text("parametric-title"))
         assertEquals(
-            "There are no parametric bands yet, so the sound is unchanged. Switch back to Graphic to shape it.",
+            "There are no parametric bands yet, so the curve is flat. Switch back to Graphic to shape it.",
             text("parametric-body"),
         )
     }

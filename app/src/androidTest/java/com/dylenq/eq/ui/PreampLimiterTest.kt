@@ -248,6 +248,32 @@ class PreampLimiterTest {
         assertFalse(ctrl.snapshot().bypass)
     }
 
+    @Test fun bypassedHidesHeadroomOverByAndSuggestionAndShowsNotAppliedInstead() {
+        ctrl.edit { it.setGraphicGain(3u, 12f) }
+        hostCard()
+        awaitUi { it.suggestedPreampDb < 0f && it.headroomAfterPreampDb < -0.05f }
+        compose.waitForIdle()
+        compose.onNodeWithTag("over-by").assertIsDisplayed()
+        compose.onNodeWithTag("apply-suggested").assertIsDisplayed()
+
+        holder.setBypass(true)
+        awaitUi { it.bypass }
+        compose.waitForIdle()
+        assertEquals(0, compose.onAllNodesWithTagCount("over-by"))
+        assertEquals(0, compose.onAllNodesWithTagCount("apply-suggested"))
+        assertEquals(0, compose.onAllNodesWithTagCount("headroom"))
+        compose.onNodeWithTag("headroom-bypassed").assertIsDisplayed()
+        compose.onNodeWithText(BYPASSED_HEADROOM_TEXT).assertIsDisplayed()
+        // The limiter stays editable while bypassed.
+        compose.onNodeWithTag("limiter-row").assertIsDisplayed()
+
+        holder.setBypass(false)
+        awaitUi { !it.bypass }
+        compose.waitForIdle()
+        assertEquals(0, compose.onAllNodesWithTagCount("headroom-bypassed"))
+        compose.onNodeWithTag("over-by").assertIsDisplayed()
+    }
+
     @Test fun compactFormOmitsTheHeadroomText() {
         hostCard(compact = true)
         assertEquals(0, compose.onAllNodesWithTagCount("headroom"))

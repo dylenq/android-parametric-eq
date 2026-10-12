@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.dp
 
 const val PARAMETRIC_TITLE = "Parametric editing isn't available yet"
 const val PARAMETRIC_BODY = "The curve above shows your current parametric bands. Switch back to Graphic to shape the sound."
-const val PARAMETRIC_BODY_EMPTY = "There are no parametric bands yet, so the sound is unchanged. Switch back to Graphic to shape it."
+const val PARAMETRIC_BODY_EMPTY = "There are no parametric bands yet, so the curve is flat. Switch back to Graphic to shape it."
 
 /** Phase 4 stand-in for the Phase 5 band list; the curve above stays live. No button. */
 @Composable
