@@ -108,6 +108,8 @@ fun CurveCard(
     state: () -> EqUiState,
     onApplySuggested: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Plot height; null uses 30% of the window height clamped to 168-260 dp (UI-SPEC). */
+    plotHeightOverride: androidx.compose.ui.unit.Dp? = null,
 ) {
     val view by remember(state) { derivedStateOf { CurveView.from(state()) } }
     val reduced = rememberReducedMotion()
@@ -124,7 +126,7 @@ fun CurveCard(
     }
 
     var showDialog by rememberSaveable { mutableStateOf(false) }
-    val plotHeight = (LocalConfiguration.current.screenHeightDp * 0.30f).coerceIn(168f, 260f).dp
+    val plotHeight = plotHeightOverride ?: defaultPlotHeight(LocalConfiguration.current.screenHeightDp).dp
 
     Card(
         modifier = modifier.fillMaxWidth(),

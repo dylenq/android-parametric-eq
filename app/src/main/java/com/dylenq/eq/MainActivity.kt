@@ -9,32 +9,20 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dylenq.eq.service.EqService
-import com.dylenq.eq.ui.BannerSlot
-import com.dylenq.eq.ui.CurveCard
-import com.dylenq.eq.ui.GraphicSliderPanel
-import com.dylenq.eq.ui.ModeRow
-import com.dylenq.eq.ui.StatusStrip
+import com.dylenq.eq.ui.EqScreen
 
 /**
  * Host activity: starts the foreground service and shows the Compose UI. The notification permission is
@@ -56,6 +44,7 @@ class MainActivity : ComponentActivity() {
         val app = application as EqApp
         val holder = app.uiHolder()
         val prefs = app.uiPrefs()
+        enableEdgeToEdge()
         setContent {
             // Interim theme until EqTheme (plan 04-06): dynamic colour on Android 12+, light/dark by system.
             val dark = isSystemInDarkTheme()
@@ -67,32 +56,15 @@ class MainActivity : ComponentActivity() {
                 else -> lightColorScheme()
             }
             MaterialTheme(colorScheme = scheme) {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-                    val ui by holder.ui.collectAsStateWithLifecycle()
-                    // Interim layout until EqScreen (this plan, task 3). Lambdas defer the state read, so a
-                    // drag redraws the plot and sliders without recomposing the screen.
-                    Column(Modifier.systemBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        StatusStrip({ ui }, onStart = ::startService)
-                        BannerSlot(
-                            notice = ui.notice,
-                            permissionGranted = notificationsGranted.value,
-                            prefs = prefs,
-                            onDismissNotice = holder::dismissNotice,
-                            onAllow = ::requestNotifications,
-                            onOpenNotificationSettings = ::openNotificationSettings,
-                        )
-                        CurveCard({ ui }, holder::applySuggestedPreamp)
-                        ModeRow(ui.mode, ui.graphicBandCount, holder::setMode, holder::setBandCount)
-                        GraphicSliderPanel(
-                            state = { ui },
-                            onDragStart = holder::onBandDragStart,
-                            onChange = holder::onBandDragChange,
-                            onDragEnd = holder::onBandDragEnd,
-                            onReset = holder::resetBand,
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                        )
-                    }
-                }
+                EqScreen(
+                    holder = holder,
+                    prefs = prefs,
+                    notificationsGranted = notificationsGranted.value,
+                    onStartService = ::startService,
+                    onAllowNotifications = ::requestNotifications,
+                    onOpenNotificationSettings = ::openNotificationSettings,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
     }
