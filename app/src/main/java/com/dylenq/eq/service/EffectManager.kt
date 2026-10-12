@@ -18,6 +18,8 @@ class EffectManager(
     private val params: () -> EngineParams,
     private val onChange: () -> Unit = {},
     private val maxSessions: Int = DEFAULT_MAX_SESSIONS,
+    /** Called on the worker after global mode was refused and per-session effects were restored. */
+    private val onGlobalRejected: (String) -> Unit = {},
 ) {
     private data class Key(val layoutId: UInt, val sampleRate: UInt, val frameDurationMs: Float)
     private data class Lim(val limiter: LimiterParams, val enabled: Boolean)
@@ -38,9 +40,27 @@ class EffectManager(
 
     private val sessions = LinkedHashMap<Int, Entry>()
     private val failed = LinkedHashMap<Int, String>()
+
+    /** Sessions tracked while global mode is on: package and last-seen tick, no handle. */
+    private class Tracked(val pkg: String, var lastSeen: Long)
+    private val suppressed = LinkedHashMap<Int, Tracked>()
+    private var globalOn = false
     private var tick = 0L
 
     fun onOpen(session: Int, pkg: String) = guarded("open") {
+        if (globalOn) {
+            val t = suppressed[session]
+            if (t != null) {
+                t.lastSeen = ++tick
+            } else {
+                while (suppressed.size >= maxSessions) {
+                    val victim = suppressed.entries.minByOrNull { it.value.lastSeen } ?: break
+                    suppressed.remove(victim.key)
+                }
+                suppressed[session] = Tracked(pkg, ++tick)
+            }
+            return@guarded
+        }
         val known = sessions[session]
         if (known != null) {
             known.lastSeen = ++tick
@@ -60,6 +80,10 @@ class EffectManager(
 
     fun onClose(session: Int) = guarded("close") {
         failed.remove(session)
+        if (globalOn) {
+            suppressed.remove(session)
+            return@guarded
+        }
         val e = sessions.remove(session) ?: return@guarded
         releaseQuietly(session, e.handle)
         Log.i(TAG, "released session=$session")
@@ -76,21 +100,103 @@ class EffectManager(
                 dropToFailed(id, e)
             }
         }
+        if (globalOn && sessions[GLOBAL_ID] == null) rejectGlobal("the effect could not be kept")
+    }
+
+    /**
+     * Global mode (L-04): one effect on session 0, per-session effects suppressed. A refusal of any
+     * kind (create throws, no control, enable fails) leaves the mode off and calls [onGlobalRejected].
+     */
+    fun setGlobalMode(on: Boolean) = guarded("global") {
+        if (on == globalOn) return@guarded
+        if (on) enableGlobal() else disableGlobal()
+    }
+
+    fun isGlobalOn(): Boolean = globalOn
+
+    private fun enableGlobal() {
+        for ((id, e) in sessions.entries.toList()) {
+            suppressed[id] = Tracked(e.pkg, e.lastSeen)
+            releaseQuietly(id, e.handle)
+        }
+        sessions.clear()
+        for ((id, pkg) in failed) suppressed.getOrPut(id) { Tracked(pkg, ++tick) }
+        failed.clear()
+        try {
+            val p = params()
+            val g = build(GLOBAL_ID, GLOBAL_PKG, p, ++tick)
+            if (g.state != SessionState.OK) {
+                releaseQuietly(GLOBAL_ID, g.handle)
+                throw IllegalStateException("no control of the output mix")
+            }
+            if (!g.handle.setEnabled(!p.bypass)) {
+                releaseQuietly(GLOBAL_ID, g.handle)
+                throw IllegalStateException("the effect could not be enabled")
+            }
+            sessions[GLOBAL_ID] = g
+            globalOn = true
+            Log.i(TAG, "global mode on")
+        } catch (t: Throwable) {
+            rejectGlobal(t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.simpleName)
+        }
+    }
+
+    private fun disableGlobal() {
+        globalOn = false
+        sessions.remove(GLOBAL_ID)?.let { releaseQuietly(GLOBAL_ID, it.handle) }
+        failed.remove(GLOBAL_ID)
+        restoreSuppressed()
+        Log.i(TAG, "global mode off")
+    }
+
+    private fun rejectGlobal(reason: String) {
+        Log.w(TAG, "global mode rejected: $reason")
+        globalOn = false
+        sessions.remove(GLOBAL_ID)?.let { releaseQuietly(GLOBAL_ID, it.handle) }
+        failed.remove(GLOBAL_ID)
+        restoreSuppressed()
+        try {
+            onGlobalRejected(reason)
+        } catch (t: Throwable) {
+            Log.e(TAG, "onGlobalRejected failed: ${t.javaClass.name}: ${t.message}")
+        }
+    }
+
+    private fun restoreSuppressed() {
+        val tracked = suppressed.entries.toList()
+        suppressed.clear()
+        if (tracked.isEmpty()) return
+        val p = try { params() } catch (t: Throwable) { null }
+        for ((id, t) in tracked) {
+            try {
+                sessions[id] = build(id, t.pkg, p ?: params(), t.lastSeen)
+            } catch (x: Throwable) {
+                Log.w(TAG, "restore failed session=$id: ${x.javaClass.name}: ${x.message}")
+                recordFailure(id, t.pkg)
+            }
+        }
     }
 
     fun releaseAll() = guarded("releaseAll") {
         for ((id, e) in sessions.entries.toList()) releaseQuietly(id, e.handle)
         sessions.clear()
         failed.clear()
+        suppressed.clear()
+        globalOn = false
     }
 
-    fun sessionCount(): Int = sessions.size
+    /** Tracked app sessions (the global effect itself is not counted). */
+    fun sessionCount(): Int = if (globalOn) suppressed.size else sessions.size
 
     fun handleFor(session: Int): EffectHandle? = sessions[session]?.handle
 
     fun sessionInfos(): List<SessionInfo> =
-        sessions.map { (id, e) -> SessionInfo(id, e.pkg, e.state) } +
-            failed.map { (id, pkg) -> SessionInfo(id, pkg, SessionState.FAILED) }
+        if (globalOn) {
+            suppressed.map { (id, t) -> SessionInfo(id, t.pkg, SessionState.SUPPRESSED) }
+        } else {
+            sessions.map { (id, e) -> SessionInfo(id, e.pkg, e.state) } +
+                failed.map { (id, pkg) -> SessionInfo(id, pkg, SessionState.FAILED) }
+        }
 
     private fun applyOne(id: Int, e: Entry, p: EngineParams) {
         val key = Key(p.layoutId, p.sampleRate, p.frameDurationMs)
@@ -115,7 +221,7 @@ class EffectManager(
         val h = e.handle
         if (p.bypass) {
             if (e.enabled) {
-                h.setEnabled(false)
+                check(h.setEnabled(false)) { "setEnabled(false) refused" }
                 e.enabled = false
             }
             // lastSent stays put so un-bypass pushes the accumulated difference.
@@ -138,7 +244,7 @@ class EffectManager(
             e.lim = lim
         }
         if (!e.enabled) {
-            h.setEnabled(true)
+            check(h.setEnabled(true)) { "setEnabled(true) refused" }
             e.enabled = true
         }
     }
@@ -210,6 +316,10 @@ class EffectManager(
 
     companion object {
         const val TAG = "EQ-SVC"
+
+        /** Session 0 is the output mix; broadcasts can never carry it (SessionIntent rejects <= 0). */
+        const val GLOBAL_ID = 0
+        private const val GLOBAL_PKG = "global"
         const val DEFAULT_MAX_SESSIONS = 16
 
         /** Gain differences at or below this are inaudible and are not sent (Assumption A3). */

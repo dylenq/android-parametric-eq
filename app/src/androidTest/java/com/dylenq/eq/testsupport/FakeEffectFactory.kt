@@ -17,6 +17,7 @@ class FakeEffectFactory : EffectFactory {
     private val sessionFaults = ConcurrentHashMap<Int, Throwable>()
     private val failAfterCalls = ConcurrentHashMap<Int, Int>()
     private val lost = ConcurrentHashMap.newKeySet<Int>()
+    private val enableRejected = ConcurrentHashMap.newKeySet<Int>()
 
     fun failNextCreate(t: Throwable) { synchronized(lock) { nextCreateFault = t } }
     fun failSession(session: Int, t: Throwable) { sessionFaults[session] = t }
@@ -25,6 +26,8 @@ class FakeEffectFactory : EffectFactory {
         private set
     fun failAfter(calls: Int) { failAfter = calls }
     fun controlLost(session: Int) { lost.add(session) }
+    /** setEnabled on this session returns false (platform status < 0). */
+    fun rejectEnable(session: Int) { enableRejected.add(session) }
 
     fun calls(): List<Call> = synchronized(lock) { ArrayList(log) }
     fun callCount(session: Int, method: String): Int =
@@ -73,7 +76,12 @@ class FakeEffectFactory : EffectFactory {
             record("setLimiter", params.limiter.thresholdDb, params.limiterEnabled)
             limThr = params.limiter.thresholdDb; limOn = params.limiterEnabled
         }
-        override fun setEnabled(on: Boolean) { record("setEnabled", on); enabled = on }
+        override fun setEnabled(on: Boolean): Boolean {
+            record("setEnabled", on)
+            if (session in enableRejected) return false
+            enabled = on
+            return true
+        }
         override fun hasControl(): Boolean = session !in lost
         override fun release() { record("release"); released = true }
 

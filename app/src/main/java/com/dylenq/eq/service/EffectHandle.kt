@@ -1,5 +1,6 @@
 package com.dylenq.eq.service
 
+import android.media.audiofx.AudioEffect
 import android.media.audiofx.DynamicsProcessing
 import com.dylenq.eq.core.EngineParams
 
@@ -7,7 +8,8 @@ interface EffectHandle {
     fun setBand(index: Int, cutoffHz: Float, gainDb: Float)
     fun setInputGain(db: Float)
     fun setLimiter(params: EngineParams)
-    fun setEnabled(on: Boolean)
+    /** True when the platform accepted the change. */
+    fun setEnabled(on: Boolean): Boolean
     fun hasControl(): Boolean
     fun release()
 
@@ -60,7 +62,7 @@ class RealEffectFactory : EffectFactory {
         }
         override fun setInputGain(db: Float) { dp.setInputGainAllChannelsTo(db) }
         override fun setLimiter(params: EngineParams) { dp.setLimiterAllChannelsTo(limiterOf(params)) }
-        override fun setEnabled(on: Boolean) { dp.enabled = on }
+        override fun setEnabled(on: Boolean): Boolean = dp.setEnabled(on) == AudioEffect.SUCCESS
         override fun hasControl(): Boolean = dp.hasControl()
         override fun release() { dp.release() }
 

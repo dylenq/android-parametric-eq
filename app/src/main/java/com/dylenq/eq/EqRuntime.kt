@@ -65,14 +65,22 @@ class EqRuntime(
 
     /** Conflated: any number of edits before the worker wakes collapse into one apply. */
     private val dirty = Channel<Unit>(Channel.CONFLATED)
-    private val events = Channel<SessionIntent.Event>(Channel.UNLIMITED)
+    private sealed interface Command {
+        data class Session(val event: SessionIntent.Event) : Command
+        data class SetGlobal(val on: Boolean) : Command
+    }
+
+    private val events = Channel<Command>(Channel.UNLIMITED)
 
     /** Fires once the trailing debounce timer expires; handled on the worker. */
     private val saveTick = Channel<Unit>(Channel.CONFLATED)
     @Volatile private var needsSave = false
     private var saveTimer: Job? = null
 
-    private val manager = EffectManager(factory, { currentParams() }, { publishStatus() })
+    private val manager = EffectManager(
+        factory, { currentParams() }, { publishStatus() },
+        onGlobalRejected = { reason -> onGlobalRejected(reason) },
+    )
 
     private val _status = MutableStateFlow(
         ServiceStatus(notice = when (opened.second) {
@@ -88,15 +96,23 @@ class EqRuntime(
 
     val isAttached: Boolean get() = attached.get()
 
+    init {
+        // The persisted global-mode choice is the first command the worker sees.
+        if (settings.globalMode) events.trySend(Command.SetGlobal(true))
+    }
+
     private val job = scope.launch {
         publishStatus()
         while (isActive) {
             try {
                 select<Unit> {
-                    events.onReceive { e ->
-                        when (e) {
-                            is SessionIntent.Event.Open -> manager.onOpen(e.session, e.pkg)
-                            is SessionIntent.Event.Close -> manager.onClose(e.session)
+                    events.onReceive { c ->
+                        when (c) {
+                            is Command.Session -> when (val e = c.event) {
+                                is SessionIntent.Event.Open -> manager.onOpen(e.session, e.pkg)
+                                is SessionIntent.Event.Close -> manager.onClose(e.session)
+                            }
+                            is Command.SetGlobal -> manager.setGlobalMode(c.on)
                         }
                     }
                     dirty.onReceive {
@@ -123,7 +139,7 @@ class EqRuntime(
     /** Enqueue a validated session event. Safe from any thread. */
     fun post(event: SessionIntent.Event) {
         if (closed) return
-        events.trySend(event)
+        events.trySend(Command.Session(event))
     }
 
     /** Cheap, any thread: ask the worker to push the current EQ to every session. */
@@ -150,6 +166,14 @@ class EqRuntime(
 
     fun setStartOnBoot(on: Boolean) { settings.startOnBoot = on }
 
+    /** Persists the choice and asks the worker to apply it. Turning it on clears an old notice. */
+    fun setGlobalMode(on: Boolean) {
+        if (closed) return
+        settings.globalMode = on
+        if (on) _status.value = _status.value.copy(notice = null)
+        events.trySend(Command.SetGlobal(on))
+    }
+
     fun shutdown() {
         if (closed) return
         try {
@@ -164,6 +188,14 @@ class EqRuntime(
         job.cancel()
         dispatcher.close()
         executor.awaitTermination(2, TimeUnit.SECONDS)
+    }
+
+    // Worker only: global mode was refused; turn the setting off and tell the user.
+    private fun onGlobalRejected(reason: String) {
+        settings.globalMode = false
+        _status.value = _status.value.copy(
+            notice = "Global mode turned off: this phone rejected it ($reason)",
+        )
     }
 
     // Worker only: trailing debounce, each apply pushes the deadline out.
@@ -197,6 +229,7 @@ class EqRuntime(
             _status.value = _status.value.copy(
                 sessionCount = manager.sessionCount(),
                 bypass = controller.snapshot().bypass,
+                globalMode = manager.isGlobalOn(),
                 sessions = manager.sessionInfos(),
             )
         } catch (t: Throwable) {
