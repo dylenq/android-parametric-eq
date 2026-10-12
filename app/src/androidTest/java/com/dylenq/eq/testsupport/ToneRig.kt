@@ -1,4 +1,4 @@
-package com.dylenq.eq.spike
+package com.dylenq.eq.testsupport
 
 import android.content.Context
 import android.media.AudioAttributes
@@ -10,8 +10,12 @@ import android.util.Log
 import kotlin.math.PI
 import kotlin.math.sin
 
-/** Looping stereo sine at -20 dBFS on its own audio session, plus Visualizer level measurement. */
-class ToneRig(val sampleRate: Int = 48000, private var toneHz: Float = 1000f) {
+/** Looping stereo sine (peak [amplitudeDbfs], default -20 dBFS) on its own audio session, plus Visualizer level measurement. */
+class ToneRig(
+    val sampleRate: Int = 48000,
+    private var toneHz: Float = 1000f,
+    val amplitudeDbfs: Double = -20.0,
+) {
     val sessionId: Int
     private var track: AudioTrack? = null
     private val frames get() = sampleRate // 1 s buffer; integer cycles for 1 kHz-ish tones
@@ -24,7 +28,7 @@ class ToneRig(val sampleRate: Int = 48000, private var toneHz: Float = 1000f) {
     }
 
     private fun pcm(): ShortArray {
-        val amp = 0.1 * 32767 // -20 dBFS
+        val amp = Math.pow(10.0, amplitudeDbfs / 20.0) * 32767
         val n = frames
         val out = ShortArray(n * 2)
         // choose whole number of cycles in the buffer so the loop point is seamless
@@ -100,7 +104,7 @@ class ToneRig(val sampleRate: Int = 48000, private var toneHz: Float = 1000f) {
             }
             reads.sort()
             val med = reads[1]
-            Log.i("SPIKE-ROUTE", "$label rms_mb=$med (reads=${reads.joinToString(",")})")
+            Log.i("EQ-ROUTE", "$label rms_mb=$med (reads=${reads.joinToString(",")})")
             return med
         }
 

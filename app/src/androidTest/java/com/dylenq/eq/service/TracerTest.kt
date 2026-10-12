@@ -13,7 +13,7 @@ import com.dylenq.eq.MainActivity
 import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.EqMode
 import com.dylenq.eq.core.FilterKind
-import com.dylenq.eq.spike.ToneRig
+import com.dylenq.eq.testsupport.ToneRig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
