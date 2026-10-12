@@ -217,6 +217,7 @@ fun CurveCard(
                     CurveInteractionLayer(
                         bands = { state().bands },
                         selected = { state().selectedBand },
+                        dragging = { state().draggingBand },
                         yWindow = { anim.value },
                         onSelect = parametric.onSelect,
                         onDragStart = parametric.onDragStart,

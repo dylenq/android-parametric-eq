@@ -18,6 +18,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.FilterKind
@@ -295,6 +307,7 @@ fun CurveInteractionLayer(
     onNodeChange: (index: Int, freqHz: Float, gainDb: Float?) -> Unit,
     onDragEnd: () -> Unit,
     modifier: Modifier = Modifier,
+    dragging: () -> Int? = { null },
     onAddBand: (freqHz: Float, gainDb: Float) -> Unit = { _, _ -> },
     onQChange: (index: Int, q: Float) -> Unit = { _, _ -> },
     onLongPress: (Int) -> Unit = {},
@@ -334,8 +347,30 @@ fun CurveInteractionLayer(
     }
 
     val cs = MaterialTheme.colorScheme
-    val fill = cs.primary
-    val ring = cs.surfaceContainerLowest
+    val colors = NodeGlyphColors(cs.primary, cs.outline, cs.surfaceContainerLowest)
+    val guideColor = cs.primary.copy(alpha = NodeGlyphs.GUIDE_ALPHA)
+    val labelColor = cs.onSurface
+    val labelDisabledColor = cs.onSurfaceVariant.copy(alpha = 0.6f)
+    val haloColor = cs.surfaceContainerLowest
+    val fontScale = LocalDensity.current.fontScale
+    val labelsOn = NodeGlyphs.labelVisible(fontScale)
+    val measurer = rememberTextMeasurer()
+    val smallStyle = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum")
+    val largeStyle = MaterialTheme.typography.labelLarge.copy(fontFeatureSettings = "tnum")
+    val density = LocalDensity.current.density
+    val labels = remember(measurer, smallStyle, largeStyle, density, labelColor, labelDisabledColor, haloColor) {
+        NodeLabels(measurer, smallStyle, largeStyle, labelColor, labelDisabledColor, haloColor, 4f * density)
+    }
+
+    // 100 ms grow of the dragged node (instant under reduced motion); read inside the draw phase.
+    val reduced = rememberReducedMotion()
+    val draggingState = rememberUpdatedState(dragging)
+    val grow = remember { Animatable(0f) }
+    val isDragging = draggingState.value() != null
+    LaunchedEffect(isDragging, reduced) {
+        val target = if (isDragging) 1f else 0f
+        if (reduced) grow.snapTo(target) else grow.animateTo(target, tween(100))
+    }
 
     Canvas(
         modifier
@@ -345,16 +380,68 @@ fun CurveInteractionLayer(
                 awaitEachGesture { runGesture(machine) }
             },
     ) {
-        val plot = PlotGeometry.plotRect(size.width, size.height, density)
+        val plot = PlotGeometry.plotRect(size.width, size.height, this.density)
         val w = windowState.value()
         val list = bandsState.value()
         val sel = selectedState.value()
-        list.forEachIndexed { i, b ->
-            val c = ParametricMath.nodePosition(b.freq, b.gainDb, b.kind.hasGain(), plot, w)
-            val r = 8.dp.toPx()
-            drawCircle(ring, r + 2.dp.toPx(), c)
-            drawCircle(fill, r, c)
-            if (i == sel) drawCircle(ring, r + 4.dp.toPx(), c, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+        val drag = draggingState.value()?.takeIf { it in list.indices }
+        val centres = list.map { ParametricMath.nodePosition(it.freq, it.gainDb, it.kind.hasGain(), plot, w) }
+
+        if (drag != null) {
+            val c = centres[drag]
+            val hair = 1.dp.toPx()
+            drawLine(guideColor, Offset(c.x, c.y), Offset(c.x, plot.bottom), hair)
+            if (list[drag].kind.hasGain()) drawLine(guideColor, Offset(c.x, c.y), Offset(plot.left, c.y), hair)
+        }
+
+        // Index order with the selected node last (on top); a dragged node is drawn above the rest too.
+        val order = list.indices.sortedBy { if (it == sel) 2 else if (it == drag) 1 else 0 }
+        for (i in order) {
+            val b = list[i]
+            val spec = NodeGlyphs.spec(b.kind, NodeVisualState(i == sel, b.enabled, i == drag))
+            drawNodeGlyph(centres[i], spec, colors, this.density, growth = if (i == drag) grow.value else 1f)
+        }
+
+        if (labelsOn) {
+            for (i in order) {
+                val b = list[i]
+                val c = centres[i]
+                val layout = labels.layout(i + 1, selected = i == sel, enabled = b.enabled)
+                val halfNode = (if (b.kind.hasGain()) NodeGlyphs.CIRCLE_DP else NodeGlyphs.DIAMOND_DP) / 2f * this.density
+                val below = NodeGlyphs.labelBelow(c.y / this.density, plot.top / this.density)
+                val y = if (below) c.y + halfNode + NodeGlyphs.LABEL_GAP_DP * this.density
+                else c.y - halfNode - NodeGlyphs.LABEL_GAP_DP * this.density - layout.first.size.height
+                val x = c.x - layout.first.size.width / 2f
+                drawText(layout.second, topLeft = Offset(x, y))
+                drawText(layout.first, topLeft = Offset(x, y))
+            }
+        }
+    }
+}
+
+/** Measured band-number labels: a text-halo layout under the fill layout, cached per (number, style). */
+private class NodeLabels(
+    private val measurer: TextMeasurer,
+    private val small: TextStyle,
+    private val large: TextStyle,
+    private val color: Color,
+    private val disabledColor: Color,
+    private val haloColor: Color,
+    private val haloStrokePx: Float,
+) {
+    private val cache = HashMap<Int, Pair<TextLayoutResult, TextLayoutResult>>()
+
+    /** (fill, halo) layouts; the halo is drawn first. */
+    fun layout(number: Int, selected: Boolean, enabled: Boolean): Pair<TextLayoutResult, TextLayoutResult> {
+        val key = number * 4 + (if (selected) 2 else 0) + (if (enabled) 1 else 0)
+        return cache.getOrPut(key) {
+            val base = if (selected) large else small
+            val fill = measurer.measure(number.toString(), base.copy(color = if (enabled) color else disabledColor))
+            val halo = measurer.measure(
+                number.toString(),
+                base.copy(color = haloColor, drawStyle = Stroke(haloStrokePx, join = StrokeJoin.Round)),
+            )
+            fill to halo
         }
     }
 }
