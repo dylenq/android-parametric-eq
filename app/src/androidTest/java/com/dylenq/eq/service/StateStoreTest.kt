@@ -94,6 +94,41 @@ class StateStoreTest {
         assertTrue(baks().single().name.startsWith("eq-state.json.corrupt-"))
     }
 
+    // Process-kill hazards at restart: open() must never throw, whatever prefix of a state file is on
+    // disk, and a leftover half-written .tmp from an interrupted save must neither be read nor block a save.
+    @Test
+    fun open_never_throws_for_any_truncation_of_a_saved_file() {
+        val store = StateStore(dir)
+        val c = EqCore()
+        c.setMode(EqMode.PARAMETRIC)
+        c.setGraphicGain(2u, 5f)
+        store.save(c)
+        val full = store.file.readBytes()
+        val cuts = (0 until full.size step 7).toList() + (full.size - 1)
+        for (n in cuts) {
+            store.file.writeBytes(full.copyOf(n))
+            val (core, notice) = store.open() // must not throw
+            if (notice == null) core.snapshot() else assertEquals(StoreNotice.Damaged, notice)
+            assertFalse("live file moved aside or replaced for n=$n", notice != null && store.file.exists())
+        }
+    }
+
+    @Test
+    fun leftover_tmp_from_an_interrupted_save_is_ignored_and_overwritten() {
+        val store = StateStore(dir)
+        val c = EqCore()
+        c.setGraphicGain(1u, 3f)
+        store.save(c)
+        val tmp = File(dir, "eq-state.json.tmp")
+        tmp.writeText("{partial")
+        val (opened, notice) = store.open()
+        assertNull(notice)
+        assertEquals(c.snapshot().graphicGainsDb, opened.snapshot().graphicGainsDb)
+        c.setGraphicGain(1u, -3f)
+        store.save(c)
+        assertEquals(-3f, store.open().first.snapshot().graphicGainsDb[1], 0f)
+    }
+
     @Test
     fun a_directory_at_the_state_path_is_backed_up() {
         val store = StateStore(dir)
