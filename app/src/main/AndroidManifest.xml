@@ -10,6 +10,7 @@
     <application
         android:name=".EqApp"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:label="EQ">
         <activity
             android:name=".MainActivity"

@@ -4,7 +4,14 @@ import org.gradle.process.ExecOperations
 
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Stable Compose set, chosen 2026-10-12 from dl.google.com maven metadata (stable releases only, no BOM).
+val composeVersion = "1.10.6"
+val material3Version = "1.4.0"
+val activityComposeVersion = "1.13.0"
+val lifecycleComposeVersion = "2.10.0"
 
 android {
     namespace = "com.dylenq.eq"
@@ -131,6 +138,15 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("androidx.annotation:annotation:1.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("androidx.compose.ui:ui:$composeVersion")
+    implementation("androidx.compose.ui:ui-graphics:$composeVersion")
+    implementation("androidx.compose.foundation:foundation:$composeVersion")
+    implementation("androidx.compose.material3:material3:$material3Version")
+    implementation("androidx.activity:activity-compose:$activityComposeVersion")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:$lifecycleComposeVersion")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4:$composeVersion")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:rules:1.7.0")
