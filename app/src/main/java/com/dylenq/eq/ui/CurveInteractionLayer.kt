@@ -425,7 +425,13 @@ fun CurveInteractionLayer(
                 val y = if (below) c.y + halfNode + NodeGlyphs.LABEL_GAP_DP * this.density
                 else c.y - halfNode - NodeGlyphs.LABEL_GAP_DP * this.density - layout.first.size.height
                 val x = c.x - layout.first.size.width / 2f
-                drawText(layout.second, topLeft = Offset(x, y))
+                // Text halo (2 dp): the halo-coloured text drawn around the fill. A Stroke drawStyle came out
+                // filled with the text colour on device, so the offsets are explicit.
+                val h = 2.dp.toPx()
+                for (k in 0 until 8) {
+                    val a = k * (Math.PI / 4).toFloat()
+                    drawText(layout.second, topLeft = Offset(x + h * kotlin.math.cos(a), y + h * kotlin.math.sin(a)))
+                }
                 drawText(layout.first, topLeft = Offset(x, y))
             }
         }
@@ -450,10 +456,7 @@ private class NodeLabels(
         return cache.getOrPut(key) {
             val base = if (selected) large else small
             val fill = measurer.measure(number.toString(), base.copy(color = if (enabled) color else disabledColor))
-            val halo = measurer.measure(
-                number.toString(),
-                base.copy(color = haloColor, drawStyle = Stroke(haloStrokePx, join = StrokeJoin.Round)),
-            )
+            val halo = measurer.measure(number.toString(), base.copy(color = haloColor))
             fill to halo
         }
     }
