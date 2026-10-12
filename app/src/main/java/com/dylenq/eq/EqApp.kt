@@ -3,6 +3,7 @@ package com.dylenq.eq
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import com.dylenq.eq.ui.UiStateHolder
 
 /** Application-scoped holder of the one [EqRuntime] shared by Activity, service and receivers. */
 class EqApp : Application() {
@@ -25,7 +26,24 @@ class EqApp : Application() {
 
     /** Tests only: replaces the runtime (null clears it so the next [runtime] call builds a fresh one). */
     fun installForTest(r: EqRuntime?) {
-        synchronized(this) { current = r }
+        synchronized(this) {
+            holder?.close()
+            holder = null
+            current = r
+        }
+    }
+
+    @Volatile private var holder: UiStateHolder? = null
+
+    /** The UI state holder bound to the current runtime; rebuilt when the runtime is replaced. */
+    fun uiHolder(): UiStateHolder {
+        val rt = runtime()
+        holder?.takeIf { it.runtime === rt }?.let { return it }
+        synchronized(this) {
+            holder?.takeIf { it.runtime === rt }?.let { return it }
+            holder?.close()
+            return UiStateHolder(rt).also { holder = it }
+        }
     }
 
     /** Tests only: the runtime currently installed, without creating one. */

@@ -1,5 +1,6 @@
 package com.dylenq.eq
 
+import com.dylenq.eq.core.CurveData
 import com.dylenq.eq.core.EngineParams
 import com.dylenq.eq.core.EqCore
 import com.dylenq.eq.core.Snapshot
@@ -39,4 +40,8 @@ class EqController internal constructor(
 
     fun engineParams(sampleRate: UInt, frameDurationMs: Float): EngineParams =
         core.engineParams(sampleRate, frameDurationMs)
+
+    /** Read-only passthrough: computing a curve does not mutate the core, so it never marks dirty. */
+    fun responseCurve(points: UInt, sampleRate: UInt, frameDurationMs: Float): CurveData =
+        core.responseCurve(points, sampleRate, frameDurationMs)
 }
