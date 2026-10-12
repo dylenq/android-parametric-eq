@@ -7,17 +7,24 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dylenq.eq.service.EqService
-import com.dylenq.eq.ui.CurveCanvas
+import com.dylenq.eq.ui.CurveCard
 
 /** Host activity: asks for notifications, starts the foreground service, shows the Compose UI. */
 class MainActivity : ComponentActivity() {
@@ -31,11 +38,22 @@ class MainActivity : ComponentActivity() {
         startForegroundService(Intent(this, EqService::class.java))
         val holder = (application as EqApp).uiHolder()
         setContent {
-            MaterialTheme {
-                val ui by holder.ui.collectAsStateWithLifecycle()
-                Column(Modifier.systemBarsPadding()) {
-                    // Draw-phase read: curve updates redraw without recomposing.
-                    CurveCanvas({ ui.curve }, Modifier.fillMaxWidth().height(200.dp))
+            // Interim theme until EqTheme (plan 04-06): dynamic colour on Android 12+, light/dark by system.
+            val dark = isSystemInDarkTheme()
+            val ctx = LocalContext.current
+            val scheme = when {
+                Build.VERSION.SDK_INT >= 31 && dark -> dynamicDarkColorScheme(ctx)
+                Build.VERSION.SDK_INT >= 31 -> dynamicLightColorScheme(ctx)
+                dark -> darkColorScheme()
+                else -> lightColorScheme()
+            }
+            MaterialTheme(colorScheme = scheme) {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+                    val ui by holder.ui.collectAsStateWithLifecycle()
+                    Column(Modifier.systemBarsPadding().padding(16.dp)) {
+                        // The lambda defers the read: drag updates redraw the plot without recomposing the screen.
+                        CurveCard({ ui }, holder::applySuggestedPreamp)
+                    }
                 }
             }
         }

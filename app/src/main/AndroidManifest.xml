@@ -14,6 +14,7 @@
         android:label="EQ">
         <activity
             android:name=".MainActivity"
+            android:theme="@style/Theme.EQ"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

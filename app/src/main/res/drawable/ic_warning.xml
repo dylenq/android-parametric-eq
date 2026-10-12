@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Warning triangle with an exclamation cut-out, authored in-repo (no icon library). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:fillType="evenOdd"
+        android:pathData="M12,2.8 L22.4,20.6 Q22.8,21.4 21.9,21.4 L2.1,21.4 Q1.2,21.4 1.6,20.6 Z M11,9.5 h2 v5.5 h-2 z M11,16.6 h2 v2 h-2 z" />
+</vector>
