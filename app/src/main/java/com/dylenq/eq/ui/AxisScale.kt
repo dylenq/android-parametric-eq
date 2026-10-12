@@ -14,6 +14,12 @@ object AxisScale {
     private val LOG_MIN = log10(MIN_HZ.toDouble())
     private val LOG_SPAN = log10(MAX_HZ.toDouble()) - LOG_MIN
 
+    /** Parametric Y axis: fixed half-span, so a +-24 dB node keeps 3 dB of room (L-01). */
+    const val PARAMETRIC_Y_HALF_SPAN_DB = 27f
+
+    /** Parametric grid and labels are those of the 24 dB window (24 / 12 / 0). */
+    const val PARAMETRIC_LABEL_WINDOW = 24
+
     /** Window grows above this magnitude... */
     const val GROW_ABOVE_DB = 11.0f
 
@@ -40,14 +46,16 @@ object AxisScale {
     }
 
     fun gridLines(window: Int): List<Int> =
-        if (window == 24) listOf(-24, -12, 0, 12, 24) else listOf(-12, -6, 0, 6, 12)
+        if (window >= 24) listOf(-24, -12, 0, 12, 24) else listOf(-12, -6, 0, 6, 12)
 
     /** Lines that get a dB label: in the 12 dB window on plots under 200 dp only -12, 0, 12. */
     fun dbLabels(window: Int, plotHeightDp: Float): List<Int> =
         if (window == 12 && plotHeightDp < 200f) listOf(-12, 0, 12) else gridLines(window)
 
     /** 0 is the top of the plot (+window), 1 the bottom (-window). */
-    fun yFraction(db: Float, window: Int): Float = (0.5f - db / (2f * window)).coerceIn(0f, 1f)
+    fun yFraction(db: Float, window: Int): Float = yFraction(db, window.toFloat())
+
+    fun yFraction(db: Float, windowDb: Float): Float = (0.5f - db / (2f * windowDb)).coerceIn(0f, 1f)
 
     private val ALL_LABELS = listOf(20f, 50f, 100f, 200f, 500f, 1000f, 2000f, 5000f, 10000f, 20000f)
     private val FEW_LABELS = listOf(100f, 1000f, 10000f)

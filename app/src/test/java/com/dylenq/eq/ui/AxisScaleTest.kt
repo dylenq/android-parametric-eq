@@ -106,4 +106,29 @@ class AxisScaleTest {
             w += 7f
         }
     }
+
+    @Test fun parametricConstants() {
+        assertEquals(27f, AxisScale.PARAMETRIC_Y_HALF_SPAN_DB, 0f)
+        assertEquals(24, AxisScale.PARAMETRIC_LABEL_WINDOW)
+    }
+
+    @Test fun gridLinesTreatWindowsFromTwentyFourAsTheWideGrid() {
+        assertEquals(listOf(-24, -12, 0, 12, 24), AxisScale.gridLines(24))
+        assertEquals(listOf(-24, -12, 0, 12, 24), AxisScale.gridLines(27))
+        assertEquals(listOf(-12, -6, 0, 6, 12), AxisScale.gridLines(12))
+        assertEquals(listOf(-24, -12, 0, 12, 24), AxisScale.dbLabels(27, 150f))
+    }
+
+    @Test fun floatYFractionOnTheParametricWindow() {
+        assertEquals(0.5f, AxisScale.yFraction(0f, 27f), 1e-6f)
+        assertEquals(0f, AxisScale.yFraction(27f, 27f), 1e-6f)
+        assertEquals(1f, AxisScale.yFraction(-27f, 27f), 1e-6f)
+        assertEquals(0.5f - 24f / 54f, AxisScale.yFraction(24f, 27f), 1e-6f)
+    }
+
+    @Test fun intYFractionStillWorks() {
+        assertEquals(0.5f, AxisScale.yFraction(0f, 12), 1e-6f)
+        assertEquals(0f, AxisScale.yFraction(24f, 24), 1e-6f)
+        assertEquals(0.25f, AxisScale.yFraction(6f, 12), 1e-6f)
+    }
 }

@@ -29,10 +29,10 @@ import androidx.compose.ui.unit.dp
 import com.dylenq.eq.core.EqMode
 import kotlin.math.abs
 
-internal val PlotInsetLeft = 36.dp
-internal val PlotInsetBottom = 20.dp
-internal val PlotInsetTop = 8.dp
-internal val PlotInsetRight = 8.dp
+internal val PlotInsetLeft = PlotGeometry.INSET_LEFT_DP.dp
+internal val PlotInsetBottom = PlotGeometry.INSET_BOTTOM_DP.dp
+internal val PlotInsetTop = PlotGeometry.INSET_TOP_DP.dp
+internal val PlotInsetRight = PlotGeometry.INSET_RIGHT_DP.dp
 
 /** Largest magnitude of the plotted data: input to the Y-window rescale rule. */
 internal fun plottedMagnitude(s: EqUiState): Float {
@@ -90,9 +90,7 @@ fun CurveCanvas(
 
     Spacer(
         modifier.drawWithCache {
-            val l = PlotInsetLeft.toPx()
-            val t = PlotInsetTop.toPx()
-            val plot = Rect(l, t, size.width - PlotInsetRight.toPx(), size.height - PlotInsetBottom.toPx())
+            val plot = PlotGeometry.plotRect(size.width, size.height, density)
             val radius = CornerRadius(12.dp.toPx())
             val plotClip = Path().apply { addRoundRect(RoundRect(plot, radius)) }
             val actual = Path()
