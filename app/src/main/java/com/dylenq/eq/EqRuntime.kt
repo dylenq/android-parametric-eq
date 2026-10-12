@@ -28,6 +28,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -132,9 +133,20 @@ class EqRuntime(
     }
 
     /** Marks the service as running. Idempotent. */
-    fun attach() { attached.set(true) }
+    fun attach() {
+        attached.set(true)
+        _status.update { it.copy(serviceRunning = true) }
+    }
 
-    fun detach() { attached.set(false) }
+    fun detach() {
+        attached.set(false)
+        _status.update { it.copy(serviceRunning = false) }
+    }
+
+    /** Clears the current notice. A no-op when there is none; later status updates keep it cleared. */
+    fun dismissNotice() {
+        _status.update { if (it.notice == null) it else it.copy(notice = null) }
+    }
 
     /** Enqueue a validated session event. Safe from any thread. */
     fun post(event: SessionIntent.Event) {
@@ -170,7 +182,7 @@ class EqRuntime(
     fun setGlobalMode(on: Boolean) {
         if (closed) return
         settings.globalMode = on
-        if (on) _status.value = _status.value.copy(notice = null)
+        if (on) _status.update { it.copy(notice = null) }
         events.trySend(Command.SetGlobal(on))
     }
 
@@ -193,9 +205,7 @@ class EqRuntime(
     // Worker only: global mode was refused; turn the setting off and tell the user.
     private fun onGlobalRejected(reason: String) {
         settings.globalMode = false
-        _status.value = _status.value.copy(
-            notice = "Global mode turned off: this phone rejected it ($reason)",
-        )
+        _status.update { it.copy(notice = "Global mode turned off: this phone rejected it ($reason)") }
     }
 
     // Worker only: trailing debounce, each apply pushes the deadline out.
@@ -226,12 +236,13 @@ class EqRuntime(
     // Worker only.
     private fun publishStatus() {
         try {
-            _status.value = _status.value.copy(
-                sessionCount = manager.sessionCount(),
-                bypass = controller.snapshot().bypass,
-                globalMode = manager.isGlobalOn(),
-                sessions = manager.sessionInfos(),
-            )
+            val count = manager.sessionCount()
+            val bypass = controller.snapshot().bypass
+            val global = manager.isGlobalOn()
+            val sessions = manager.sessionInfos()
+            _status.update {
+                it.copy(sessionCount = count, bypass = bypass, globalMode = global, sessions = sessions)
+            }
         } catch (t: Throwable) {
             Log.e("EQ-SVC", "publishStatus failed: ${t.javaClass.name}: ${t.message}")
         }

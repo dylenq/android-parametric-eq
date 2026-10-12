@@ -12,4 +12,6 @@ data class ServiceStatus(
     val globalMode: Boolean = false,
     val sessions: List<SessionInfo> = emptyList(),
     val notice: String? = null,
+    /** True between EqService attach and detach. */
+    val serviceRunning: Boolean = false,
 )
