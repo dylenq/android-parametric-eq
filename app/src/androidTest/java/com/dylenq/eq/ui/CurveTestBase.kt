@@ -65,6 +65,9 @@ abstract class CurveTestBase {
         onLongPress = { longPresses.add(it) },
         onPinchCompleted = { pinchCompleted.incrementAndGet() },
         onDeselect = { holder.selectBand(null) },
+        onSetKind = holder::setBandKind,
+        onSetEnabled = holder::setBandEnabled,
+        onDeleteBand = holder::removeBand,
     )
 
     /** The card with its interaction layer filling the window. */

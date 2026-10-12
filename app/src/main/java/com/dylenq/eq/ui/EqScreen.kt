@@ -85,6 +85,9 @@ fun EqScreen(
             onAddBand = holder::addBandAt,
             onQChange = holder::setBandQ,
             onDeselect = { holder.selectBand(null) },
+            onSetKind = holder::setBandKind,
+            onSetEnabled = holder::setBandEnabled,
+            onDeleteBand = holder::removeBand,
         )
     }
 

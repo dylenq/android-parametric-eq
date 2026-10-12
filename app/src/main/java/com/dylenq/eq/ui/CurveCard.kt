@@ -87,6 +87,9 @@ class ParametricActions(
     val onLongPress: (Int) -> Unit = {},
     val onPinchCompleted: () -> Unit = {},
     val onDeselect: () -> Unit = {},
+    val onSetKind: (index: Int, kind: com.dylenq.eq.core.FilterKind) -> Unit = { _, _ -> },
+    val onSetEnabled: (index: Int, on: Boolean) -> Unit = { _, _ -> },
+    val onDeleteBand: (index: Int) -> Unit = {},
 )
 
 /** What the card's chrome (legend, chip, caption, semantics) needs; equal values do not recompose. */
@@ -228,6 +231,9 @@ fun CurveCard(
                         onLongPress = parametric.onLongPress,
                         onPinchCompleted = parametric.onPinchCompleted,
                         onDeselect = parametric.onDeselect,
+                        onSetKind = parametric.onSetKind,
+                        onSetEnabled = parametric.onSetEnabled,
+                        onDeleteBand = parametric.onDeleteBand,
                         modifier = Modifier.matchParentSize(),
                     )
                     NodeReadoutChip(

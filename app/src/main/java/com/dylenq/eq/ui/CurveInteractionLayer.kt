@@ -1,9 +1,20 @@
 package com.dylenq.eq.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.systemGestureExclusion
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Rect
@@ -326,6 +337,9 @@ fun CurveInteractionLayer(
     onLongPress: (Int) -> Unit = {},
     onPinchCompleted: () -> Unit = {},
     onDeselect: () -> Unit = {},
+    onSetKind: (index: Int, kind: FilterKind) -> Unit = { _, _ -> },
+    onSetEnabled: (index: Int, on: Boolean) -> Unit = { _, _ -> },
+    onDeleteBand: (index: Int) -> Unit = {},
 ) {
     val bandsState = rememberUpdatedState(bands)
     val selectedState = rememberUpdatedState(selected)
@@ -340,6 +354,14 @@ fun CurveInteractionLayer(
     val onLongPressState = rememberUpdatedState(onLongPress)
     val onPinchCompletedState = rememberUpdatedState(onPinchCompleted)
     val onDeselectState = rememberUpdatedState(onDeselect)
+    val onSetKindState = rememberUpdatedState(onSetKind)
+    val onSetEnabledState = rememberUpdatedState(onSetEnabled)
+    val onDeleteBandState = rememberUpdatedState(onDeleteBand)
+    // The long-press menu's band, or null. Transient: it does not survive rotation.
+    val menu = remember { mutableStateOf<Int?>(null) }
+    // The band as it was when the menu opened: if the band at that index changes underneath (delete,
+    // undo, a TalkBack action) the menu closes instead of acting on a different band (T-05-10).
+    val menuOpenedWith = remember { mutableStateOf<Band?>(null) }
     val machine = remember {
         MachineInputs(
             bands = { bandsState.value() },
@@ -351,7 +373,11 @@ fun CurveInteractionLayer(
             onDragEnd = { onDragEndState.value() },
             onAddBand = { f, g -> onAddBandState.value(f, g) },
             onQChange = { i, q -> onQChangeState.value(i, q) },
-            onLongPress = { onLongPressState.value(it) },
+            onLongPress = {
+                menuOpenedWith.value = bandsState.value().getOrNull(it)
+                menu.value = it
+                onLongPressState.value(it)
+            },
             onPinchCompleted = { onPinchCompletedState.value() },
             onDeselect = { onDeselectState.value() },
             haptics = hapticsState,
@@ -385,8 +411,11 @@ fun CurveInteractionLayer(
         if (reduced) grow.snapTo(target) else grow.animateTo(target, tween(100))
     }
 
+    var boxSize by remember { mutableStateOf(IntSize.Zero) }
+    Box(modifier.onSizeChanged { boxSize = it }) {
     Canvas(
-        modifier
+        Modifier
+            .fillMaxSize()
             .testTag("curve-interaction")
             .systemGestureExclusion()
             .pointerInput(Unit) {
@@ -435,6 +464,25 @@ fun CurveInteractionLayer(
                 drawText(layout.first, topLeft = Offset(x, y))
             }
         }
+    }
+
+    // The long-press menu, anchored at the node. A band that disappears (delete, undo) closes it.
+    val open = menu.value
+    val menuBand = open?.let { bandsState.value().getOrNull(it) }
+    if (open != null && (menuBand == null || menuBand != menuOpenedWith.value)) SideEffect { menu.value = null }
+    if (open != null && menuBand != null && menuBand == menuOpenedWith.value && boxSize != IntSize.Zero) {
+        val plot = PlotGeometry.plotRect(boxSize.width.toFloat(), boxSize.height.toFloat(), density)
+        val c = ParametricMath.nodePosition(menuBand.freq, menuBand.gainDb, menuBand.kind.hasGain(), plot, windowState.value())
+        BandMenu(
+            band = menuBand,
+            expanded = true,
+            onKind = { onSetKindState.value(open, it) },
+            onToggleEnabled = { onSetEnabledState.value(open, !menuBand.enabled) },
+            onDelete = { onDeleteBandState.value(open) },
+            onDismiss = { menu.value = null },
+            modifier = Modifier.offset { IntOffset(c.x.roundToInt(), c.y.roundToInt()) },
+        )
+    }
     }
 }
 
