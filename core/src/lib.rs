@@ -9,6 +9,7 @@ pub mod dsp;
 pub mod fit;
 pub mod graphic;
 pub mod grid;
+pub mod headroom;
 pub mod history;
 // Parser kept for presets (v2); not exported over FFI.
 #[allow(dead_code)]
