@@ -3,6 +3,7 @@ package com.dylenq.eq
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import com.dylenq.eq.ui.UiPrefs
 import com.dylenq.eq.ui.UiStateHolder
 
 /** Application-scoped holder of the one [EqRuntime] shared by Activity, service and receivers. */
@@ -44,6 +45,16 @@ class EqApp : Application() {
             holder?.close()
             return UiStateHolder(rt).also { holder = it }
         }
+    }
+
+    @Volatile private var prefs: UiPrefs? = null
+
+    /** The persisted UI flags (notification rationale answered). */
+    fun uiPrefs(): UiPrefs = prefs ?: synchronized(this) { prefs ?: UiPrefs(this).also { prefs = it } }
+
+    /** Tests only: swaps the UI flags (null restores the on-disk ones). */
+    fun installUiPrefsForTest(p: UiPrefs?) {
+        synchronized(this) { prefs = p }
     }
 
     /** Tests only: the runtime currently installed, without creating one. */

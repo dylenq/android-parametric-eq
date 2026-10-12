@@ -26,15 +26,21 @@ class EqComposeRule(factoryProvider: () -> com.dylenq.eq.service.EffectFactory =
 
     val runtime get() = runtimeRule.runtime
 
+    /** In-memory UI flags for the test (the on-disk ones are untouched and restored). */
+    val uiPrefs = com.dylenq.eq.ui.UiPrefs(null)
+
     fun launch(): ActivityScenario<MainActivity> =
         ActivityScenario.launch(MainActivity::class.java).also { scenario = it }
 
     private val cleanup = object : TestRule {
         override fun apply(base: Statement, description: Description) = object : Statement() {
             override fun evaluate() {
+                val app = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as com.dylenq.eq.EqApp
+                app.installUiPrefsForTest(uiPrefs)
                 try {
                     base.evaluate()
                 } finally {
+                    app.installUiPrefsForTest(null)
                     scenario?.close()
                     scenario = null
                     val ctx = InstrumentationRegistry.getInstrumentation().targetContext

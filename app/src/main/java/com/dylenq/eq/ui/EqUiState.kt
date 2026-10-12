@@ -44,6 +44,10 @@ data class EqUiState(
     val globalMode: Boolean = false,
     val notice: String? = null,
 ) {
+    /** True when at least one parametric band is enabled (the placeholder copy depends on it). */
+    val hasEnabledParametricBands: Boolean
+        get() = parametricEnabledCount > 0
+
     /** Gain of [lastTouchedBand], if any. */
     val lastTouchedGainDb: Float?
         get() = lastTouchedBand?.let { graphicGainsDb.getOrNull(it) }

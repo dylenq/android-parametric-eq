@@ -1,17 +1,20 @@
 package com.dylenq.eq
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
@@ -21,26 +24,38 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dylenq.eq.service.EqService
-import com.dylenq.eq.ui.BandCountMenu
+import com.dylenq.eq.ui.BannerSlot
 import com.dylenq.eq.ui.CurveCard
 import com.dylenq.eq.ui.GraphicSliderPanel
+import com.dylenq.eq.ui.ModeRow
+import com.dylenq.eq.ui.StatusStrip
 
-/** Host activity: asks for notifications, starts the foreground service, shows the Compose UI. */
+/**
+ * Host activity: starts the foreground service and shows the Compose UI. The notification permission is
+ * requested only from the rationale banner's "Allow" (never at launch).
+ */
 class MainActivity : ComponentActivity() {
+    /** Re-read in onResume; below API 33 there is no runtime permission, so it counts as granted. */
+    private val notificationsGranted = mutableStateOf(true)
+
+    private val permissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notificationsGranted.value = granted
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 33 &&
-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
-        }
+        refreshPermission()
         startForegroundService(Intent(this, EqService::class.java))
-        val holder = (application as EqApp).uiHolder()
+        val app = application as EqApp
+        val holder = app.uiHolder()
+        val prefs = app.uiPrefs()
         setContent {
             // Interim theme until EqTheme (plan 04-06): dynamic colour on Android 12+, light/dark by system.
             val dark = isSystemInDarkTheme()
@@ -54,11 +69,20 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = scheme) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
                     val ui by holder.ui.collectAsStateWithLifecycle()
-                    // Interim layout until EqScreen (plan 04-06). Lambdas defer the state read, so a drag
-                    // redraws the plot and sliders without recomposing the screen.
+                    // Interim layout until EqScreen (this plan, task 3). Lambdas defer the state read, so a
+                    // drag redraws the plot and sliders without recomposing the screen.
                     Column(Modifier.systemBarsPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        StatusStrip({ ui }, onStart = ::startService)
+                        BannerSlot(
+                            notice = ui.notice,
+                            permissionGranted = notificationsGranted.value,
+                            prefs = prefs,
+                            onDismissNotice = holder::dismissNotice,
+                            onAllow = ::requestNotifications,
+                            onOpenNotificationSettings = ::openNotificationSettings,
+                        )
                         CurveCard({ ui }, holder::applySuggestedPreamp)
-                        BandCountMenu(ui.graphicBandCount, holder::setBandCount)
+                        ModeRow(ui.mode, ui.graphicBandCount, holder::setMode, holder::setBandCount)
                         GraphicSliderPanel(
                             state = { ui },
                             onDragStart = holder::onBandDragStart,
@@ -70,6 +94,34 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshPermission()
+    }
+
+    private fun refreshPermission() {
+        notificationsGranted.value = Build.VERSION.SDK_INT < 33 ||
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun startService() {
+        startForegroundService(Intent(this, EqService::class.java))
+    }
+
+    /** Only the rationale banner's "Allow" gets here. */
+    private fun requestNotifications() {
+        if (Build.VERSION.SDK_INT >= 33) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    /** App notification settings for this package only. */
+    private fun openNotificationSettings() {
+        val i = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        try {
+            startActivity(i)
+        } catch (_: ActivityNotFoundException) {
         }
     }
 }
