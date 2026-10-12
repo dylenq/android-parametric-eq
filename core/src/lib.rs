@@ -6,6 +6,10 @@ uniffi::setup_scaffolding!();
 
 pub mod dsp;
 pub mod graphic;
+pub mod history;
+// Parser kept for presets (v2); not exported over FFI.
+#[allow(dead_code)]
+pub(crate) mod import;
 pub mod model;
 
 /// The single object Kotlin talks to. Later plans add state and methods here.
