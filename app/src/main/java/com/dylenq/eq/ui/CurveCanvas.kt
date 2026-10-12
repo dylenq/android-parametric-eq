@@ -34,18 +34,6 @@ internal val PlotInsetBottom = 20.dp
 internal val PlotInsetTop = 8.dp
 internal val PlotInsetRight = 8.dp
 
-/**
- * True when the system animation scale is 0 (reduced motion): every animation in the screen then
- * snaps (UI-SPEC "Reduced motion"). Read once per composition; EqTheme reuses it.
- */
-@Composable
-fun rememberReducedMotion(): Boolean {
-    val ctx = LocalContext.current
-    return remember(ctx) {
-        Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-    }
-}
-
 /** Largest magnitude of the plotted data: input to the Y-window rescale rule. */
 internal fun plottedMagnitude(s: EqUiState): Float {
     val c = s.curve ?: return 0f

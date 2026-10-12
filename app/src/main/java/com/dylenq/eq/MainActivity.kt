@@ -11,18 +11,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import com.dylenq.eq.service.EqService
 import com.dylenq.eq.ui.EqScreen
+import com.dylenq.eq.ui.EqTheme
 
 /**
  * Host activity: starts the foreground service and shows the Compose UI. The notification permission is
@@ -46,16 +40,7 @@ class MainActivity : ComponentActivity() {
         val prefs = app.uiPrefs()
         enableEdgeToEdge()
         setContent {
-            // Interim theme until EqTheme (plan 04-06): dynamic colour on Android 12+, light/dark by system.
-            val dark = isSystemInDarkTheme()
-            val ctx = LocalContext.current
-            val scheme = when {
-                Build.VERSION.SDK_INT >= 31 && dark -> dynamicDarkColorScheme(ctx)
-                Build.VERSION.SDK_INT >= 31 -> dynamicLightColorScheme(ctx)
-                dark -> darkColorScheme()
-                else -> lightColorScheme()
-            }
-            MaterialTheme(colorScheme = scheme) {
+            EqTheme {
                 EqScreen(
                     holder = holder,
                     prefs = prefs,

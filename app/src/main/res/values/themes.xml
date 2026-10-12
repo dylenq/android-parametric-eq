@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- No system action bar: Compose draws the whole screen. Light by default, dark via values-night. -->
-    <style name="Theme.EQ" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- No system action bar: Compose draws the whole screen. Light here, dark via values-night. The window
+         background matches the Compose surface before the first frame. -->
+    <style name="Theme.EQ" parent="android:Theme.DeviceDefault.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>
