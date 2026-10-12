@@ -2,6 +2,7 @@ package com.dylenq.eq.core
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.dylenq.eq.EqController
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -128,6 +129,66 @@ class EqCoreBindingTest {
             } catch (e: EqException.OutOfRange) {
                 // expected
             }
+        }
+    }
+
+    @Test
+    fun band_response_db_returns_the_peak_and_rejects_bad_arguments() {
+        EqCore().use { core ->
+            core.setBand(0u, peak(1000f, 6f))
+            val r = core.bandResponseDb(0u, 64u, 48000u)
+            assertEquals(64, r.size)
+            assertEquals(6f, r.max(), 0.05f)
+            try {
+                core.bandResponseDb(99u, 64u, 48000u)
+                fail("expected EqException.OutOfRange")
+            } catch (e: EqException.OutOfRange) {
+            }
+            try {
+                core.bandResponseDb(0u, 1u, 48000u)
+                fail("expected EqException.InvalidValue")
+            } catch (e: EqException.InvalidValue) {
+            }
+        }
+    }
+
+    @Test
+    fun reset_bands_restores_defaults_and_is_one_undo_step() {
+        EqCore().use { core ->
+            val first = core.snapshot().bands[0]
+            core.setBand(0u, peak(5000f, 9f))
+            core.resetBands()
+            assertEquals(first, core.snapshot().bands[0])
+            assertTrue(core.undo())
+            assertEquals(peak(5000f, 9f), core.snapshot().bands[0])
+        }
+    }
+
+    @Test
+    fun core_limits_match_what_parametric_math_mirrors() {
+        EqCore().use { core ->
+            core.setBand(0u, Band(FilterKind.PEAK, 1e9f, 500f, 100f, true))
+            val hi = core.snapshot().bands[0]
+            assertEquals(20000f, hi.freq, 0f)
+            assertEquals(24f, hi.gainDb, 0f)
+            assertEquals(18f, hi.q, 0f)
+            core.setBand(0u, Band(FilterKind.PEAK, 5f, -500f, 0f, true))
+            val lo = core.snapshot().bands[0]
+            assertEquals(20f, lo.freq, 0f)
+            assertEquals(-24f, lo.gainDb, 0f)
+            assertEquals(0.1f, lo.q, 1e-6f)
+        }
+    }
+
+    @Test
+    fun controller_band_response_is_read_only_and_reset_marks_dirty() {
+        EqCore().use { core ->
+            var dirty = 0
+            val c = EqController(core) { dirty++ }
+            c.bandResponse(0u, 64u, 48000u)
+            assertEquals(0, dirty)
+            c.resetBands()
+            assertEquals(1, dirty)
         }
     }
 }

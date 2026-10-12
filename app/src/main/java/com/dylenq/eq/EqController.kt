@@ -44,4 +44,11 @@ class EqController internal constructor(
     /** Read-only passthrough: computing a curve does not mutate the core, so it never marks dirty. */
     fun responseCurve(points: UInt, sampleRate: UInt, frameDurationMs: Float): CurveData =
         core.responseCurve(points, sampleRate, frameDurationMs)
+
+    /** Read-only: one band's own response (dB) on the response-curve grid; never marks dirty. */
+    fun bandResponse(index: UInt, points: UInt, sampleRate: UInt): FloatArray =
+        core.bandResponseDb(index, points, sampleRate).toFloatArray()
+
+    /** Restores the default bands and 0 dB preamp as one undo step. */
+    fun resetBands() = edit { it.resetBands() }
 }
