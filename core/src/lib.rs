@@ -4,6 +4,9 @@ use std::sync::Arc;
 
 uniffi::setup_scaffolding!();
 
+pub mod dsp;
+pub mod model;
+
 /// The single object Kotlin talks to. Later plans add state and methods here.
 #[derive(uniffi::Object)]
 pub struct EqCore {}
