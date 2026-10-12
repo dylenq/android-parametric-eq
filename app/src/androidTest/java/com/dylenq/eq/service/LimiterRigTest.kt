@@ -15,7 +15,9 @@ import org.junit.runner.RunWith
 
 /**
  * Measures the limiter (off vs on) through the production path and logs a table under EQ-LIMITER.
- * The test asserts only that the table was produced; the verdict is recorded in LIMITER-TABLE.md.
+ * The test asserts the result after logging every row: the disabled reading must track the input
+ * within 0.5 dB, pass-through rows must match the prediction within 0.5 dB, and compressive rows
+ * (input above the threshold) must match within 1.5 dB. LIMITER-TABLE.md holds the narrative.
  */
 @RunWith(AndroidJUnit4::class)
 class LimiterRigTest {
@@ -37,12 +39,17 @@ class LimiterRigTest {
     private val threshold = -6.0
     private val ratio = 10.0
 
+    private data class Row(
+        val frame: Float, val peak: Double, val preamp: Float,
+        val off: Double, val on: Double, val inDbfs: Double, val offset: Double, val predicted: Double,
+    )
+
     @Test
     fun produces_the_limiter_table() {
         val runtime = rt.runtime
         val c = runtime.controller
         val rows = listOf(-20.0 to 0f, -10.0 to 0f, -3.0 to 0f, -3.0 to 6f, -3.0 to 12f)
-        var produced = 0
+        val measured = mutableListOf<Row>()
         // Visualizer RMS is not in dBFS (a -20 dBFS peak sine, RMS -23.01 dBFS, reads about -55.5).
         // Calibrate the offset from the first row of each frame (-20 dBFS peak, limiter far below
         // its threshold), then compare in the Visualizer scale. Input level is analytic.
@@ -75,7 +82,7 @@ class LimiterRigTest {
                         "EQ-LIMITER",
                         "ROW frame=$frame peak=$peak preamp=$preamp disabled=$off enabled=$on predicted=$predicted inDbfs=$inDbfs offset=$offset offDiff=${off - (inDbfs + offset)} diff=${on - predicted}",
                     )
-                    produced++
+                    measured.add(Row(frame, peak, preamp, off, on, inDbfs, offset, predicted))
                 } finally {
                     vis.release()
                     rig.release()
@@ -84,6 +91,14 @@ class LimiterRigTest {
                 }
             }
         }
-        assertEquals(10, produced)
+        assertEquals(10, measured.size)
+        for (r in measured) {
+            val tag = "frame=${r.frame} peak=${r.peak} preamp=${r.preamp}"
+            val offDiff = r.off - (r.inDbfs + r.offset)
+            assertTrue("disabled reading off by $offDiff dB at $tag", Math.abs(offDiff) <= 0.5)
+            val diff = r.on - r.predicted
+            val bound = if (r.inDbfs > threshold) 1.5 else 0.5
+            assertTrue("enabled reading off prediction by $diff dB (bound $bound) at $tag", Math.abs(diff) <= bound)
+        }
     }
 }
