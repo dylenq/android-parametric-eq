@@ -9,3 +9,5 @@ rust-probe/target/
 app/src/main/jniLibs/
 *.iml
 .idea/
+__pycache__/
+.planning/state.json
