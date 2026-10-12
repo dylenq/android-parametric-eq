@@ -48,7 +48,6 @@ private const val MAX_PORTRAIT_WIDTH_DP = 640
 private const val PANE_GAP_DP = 8f
 private const val LEFT_PANE_FRACTION = 0.44f
 private const val LEFT_PANE_MIN_DP = 280
-private const val RIGHT_PANE_PANEL_MIN_DP = 169f
 private const val LEFT_PANE_PLOT_MIN_DP = 120f
 
 /**
@@ -154,9 +153,10 @@ fun EqScreen(
                         SingleColumn(
                             availablePx = constraints.maxHeight,
                             desiredPlotDp = defaultPlotHeight(spec.heightDp),
-                            chromeDp = curveChromeDp(spec.fontScale),
+                            chromeDp = curveChromeDp(spec.fontScale, spec.widthDp),
+                            contentMinDp = graphicPanelMinDp(spec.fontScale, compact = false),
                             modifier = Modifier.verticalScroll(scroll).testTag("eq-column"),
-                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true) },
+                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp)) },
                             mode = mode,
                             content = { modeContent(false) },
                             preamp = { preamp(false) },
@@ -171,12 +171,12 @@ fun EqScreen(
                     FlexColumn(
                         availableHeight = maxHeight,
                         flexIndex = 2,
-                        flexMinDp = curveChromeDp(spec.fontScale) + LEFT_PANE_PLOT_MIN_DP,
+                        flexMinDp = curveChromeDp(spec.fontScale, spec.widthDp) + LEFT_PANE_PLOT_MIN_DP,
                         modifier = Modifier.verticalScroll(rememberScrollState()),
                         slots = listOf(
                             strip,
                             banner,
-                            { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true) },
+                            { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp)) },
                             mode,
                         ),
                     )
@@ -186,7 +186,7 @@ fun EqScreen(
                     FlexColumn(
                         availableHeight = maxHeight,
                         flexIndex = 0,
-                        flexMinDp = RIGHT_PANE_PANEL_MIN_DP,
+                        flexMinDp = graphicPanelMinDp(spec.fontScale, compact = true),
                         modifier = Modifier.verticalScroll(rememberScrollState()).testTag("right-pane-scroll"),
                         slots = listOf({ modeContent(true) }, { preamp(true) }),
                     )
@@ -206,6 +206,7 @@ private fun SingleColumn(
     availablePx: Int,
     desiredPlotDp: Float,
     chromeDp: Float,
+    contentMinDp: Float,
     modifier: Modifier,
     curve: @Composable () -> Unit,
     mode: @Composable () -> Unit,
@@ -227,9 +228,9 @@ private fun SingleColumn(
         val modeP = measurables[1].measure(loose)
         val preampP = measurables[3].measure(loose)
         val fixedDp = (modeP.height + preampP.height) / d + chromeDp
-        val plan = planColumn(availablePx / d, fixedDp, desiredPlotDp)
+        val plan = planColumn(availablePx / d, fixedDp, desiredPlotDp, contentMinDp = contentMinDp)
         val gap = (COLUMN_GAP_DP * d).roundToInt()
-        val minContentPx = (CONTENT_MIN_DP * d).roundToInt()
+        val minContentPx = (contentMinDp * d).roundToInt()
         var curveH = ((chromeDp + plan.plotDp) * d).roundToInt()
         // Whole pixels: when it all fits, rounding must not push the panel under its minimum (that would scroll).
         if (!plan.scrolls) curveH = minOf(curveH, availablePx - modeP.height - preampP.height - 3 * gap - minContentPx)

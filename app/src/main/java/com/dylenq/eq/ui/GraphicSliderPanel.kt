@@ -58,9 +58,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
-private val LabelRow = 20.dp
 private val LabelGap = 4.dp
 private val ScaleWidth = 32.dp
 private val ScrollEndPadding = 8.dp
@@ -70,6 +70,11 @@ private val MinTrackCompact = 121.dp
 private val ThumbInsetDp = 14.dp
 
 private const val HINT = "Drag a slider. Double-tap to reset it."
+private const val HINT_SHORT = "Drag a slider"
+
+/** The per-slider gain label; without the unit at large font, where the column is only 48 dp wide. */
+internal fun gainLabel(db: Float, fontScale: Float): String =
+    GainFormat.format(db).let { if (fontScale >= 1.3f) it.removeSuffix(" dB") else it }
 private val Tnum = TextStyle(fontFeatureSettings = "tnum")
 
 /**
@@ -91,6 +96,9 @@ fun GraphicSliderPanel(
     scroll: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
 ) {
     val minTrack = if (compact) MinTrackCompact else MinTrack
+    val large = LocalDensity.current.fontScale >= 1.3f
+    val labelRow = sliderLabelRowDp(LocalDensity.current.fontScale).dp
+    val labelRows = if (large) 2 else 1
     val bandCount by remember { derivedStateOf { state().graphicBandCount } }
     val bypass by remember { derivedStateOf { state().bypass } }
     val reduced = rememberReducedMotion()
@@ -113,18 +121,18 @@ fun GraphicSliderPanel(
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = if (compact) 0.dp else 4.dp).alpha(if (bypass) 0.6f else 1f)) {
                 ReadoutBar(state)
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().heightIn(min = minTrack + LabelRow + LabelGap)) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().heightIn(min = minTrack + labelRow * labelRows + LabelGap)) {
                     val rowWidth = maxWidth - ScaleWidth
                     val showLabels = SliderMath.showsGainLabel(SliderMath.columnPitch(rowWidth.value, bandCount, fontScale))
                     Row(Modifier.fillMaxSize()) {
-                        DbScaleColumn(topReserve = if (showLabels) LabelRow else 0.dp)
+                        DbScaleColumn(topReserve = if (showLabels) labelRow else 0.dp, labelRow = labelRow)
                         Box(Modifier.weight(1f).fillMaxHeight()) {
                             Crossfade(
                                 targetState = bandCount,
                                 animationSpec = if (reduced) snap() else tween(200),
                                 label = "bands",
                             ) { count ->
-                                SliderRow(count, rowWidth.value, fontScale, scroll, state, bubble, onDragStart, onChange, onDragEnd, onReset)
+                                SliderRow(count, rowWidth.value, fontScale, labelRow, scroll, state, bubble, onDragStart, onChange, onDragEnd, onReset)
                             }
                             ScrollEdgeFade(scroll, cardColor, reduced)
                         }
@@ -148,8 +156,11 @@ private fun ReadoutBar(state: () -> EqUiState) {
     val band = s.lastTouchedBand
     val hz = band?.let { s.graphicCentresHz.getOrNull(it) }
     val gain = band?.let { s.graphicGainsDb.getOrNull(it) }
-    val text = if (hz != null && gain != null) "${FreqFormat.withUnit(hz)}   ${GainFormat.format(gain)}" else HINT
-    Box(Modifier.fillMaxWidth().height(24.dp), contentAlignment = Alignment.CenterStart) {
+    val fs = LocalDensity.current.fontScale
+    val hint = if (fs >= 1.3f) HINT_SHORT else HINT
+    val text = if (hz != null && gain != null) "${FreqFormat.withUnit(hz)}   ${GainFormat.format(gain)}" else hint
+    val height = with(LocalDensity.current) { 20.sp.toDp() }.let { maxOf(24.dp, it + 4.dp) }
+    Box(Modifier.fillMaxWidth().height(height), contentAlignment = Alignment.CenterStart) {
         Text(
             text,
             style = MaterialTheme.typography.bodyMedium.merge(Tnum),
@@ -162,9 +173,9 @@ private fun ReadoutBar(state: () -> EqUiState) {
 }
 
 @Composable
-private fun DbScaleColumn(topReserve: androidx.compose.ui.unit.Dp) {
+private fun DbScaleColumn(topReserve: androidx.compose.ui.unit.Dp, labelRow: androidx.compose.ui.unit.Dp) {
     val colour = MaterialTheme.colorScheme.onSurfaceVariant
-    val style = MaterialTheme.typography.labelSmall.merge(Tnum)
+    val style = MaterialTheme.typography.labelSmall.merge(Tnum).capScale()
     Column(Modifier.width(ScaleWidth).fillMaxHeight().clearAndSetSemantics {}) {
         Spacer(Modifier.height(topReserve))
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
@@ -180,7 +191,7 @@ private fun DbScaleColumn(topReserve: androidx.compose.ui.unit.Dp) {
                 )
             }
         }
-        Box(Modifier.height(LabelRow + LabelGap), contentAlignment = Alignment.BottomEnd) {
+        Box(Modifier.height(labelRow + LabelGap), contentAlignment = Alignment.BottomEnd) {
             Text("Hz", style = style, color = colour, modifier = Modifier.padding(end = 4.dp))
         }
     }
@@ -192,6 +203,7 @@ private fun SliderRow(
     count: Int,
     rowWidthDp: Float,
     fontScale: Float,
+    labelRow: androidx.compose.ui.unit.Dp,
     scroll: ScrollState,
     state: () -> EqUiState,
     bubble: BubbleState,
@@ -219,12 +231,12 @@ private fun SliderRow(
             Column(Modifier.width(pitch).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally) {
                 if (showGain) {
                     Text(
-                        GainFormat.format(state().graphicGainsDb.getOrElse(i) { 0f }),
-                        style = MaterialTheme.typography.labelSmall.merge(Tnum),
+                        gainLabel(state().graphicGainsDb.getOrElse(i) { 0f }, fontScale),
+                        style = MaterialTheme.typography.labelSmall.merge(Tnum).capScale(),
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.height(LabelRow).clearAndSetSemantics { testTag = "gain-label" },
+                        modifier = Modifier.height(labelRow).clearAndSetSemantics { testTag = "gain-label" },
                     )
                 }
                 VerticalGainSlider(
@@ -245,13 +257,13 @@ private fun SliderRow(
                 Spacer(Modifier.height(LabelGap))
                 Text(
                     FreqFormat.format(hz),
-                    style = MaterialTheme.typography.labelSmall.merge(Tnum),
+                    style = MaterialTheme.typography.labelSmall.merge(Tnum).capScale(),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Clip,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.height(LabelRow).fillMaxWidth().clearAndSetSemantics {},
+                    modifier = Modifier.height(labelRow).fillMaxWidth().clearAndSetSemantics {},
                 )
             }
         }

@@ -55,10 +55,16 @@ const val COLUMN_GAP_DP = 12f
  * minimum still fit [availDp]; otherwise it shrinks down to 168 dp, and below that the column scrolls.
  * [fixedDp] is the sum of the mode row, preamp card and the curve card chrome (header, footer, padding).
  */
-fun planColumn(availDp: Float, fixedDp: Float, desiredPlotDp: Float, gapDp: Float = COLUMN_GAP_DP): ColumnPlan {
+fun planColumn(
+    availDp: Float,
+    fixedDp: Float,
+    desiredPlotDp: Float,
+    gapDp: Float = COLUMN_GAP_DP,
+    contentMinDp: Float = CONTENT_MIN_DP,
+): ColumnPlan {
     val room = availDp - fixedDp - 3 * gapDp
-    val plot = desiredPlotDp.coerceAtMost(room - CONTENT_MIN_DP).coerceAtLeast(PLOT_MIN_DP)
-    val content = maxOf(CONTENT_MIN_DP, room - plot)
+    val plot = desiredPlotDp.coerceAtMost(room - contentMinDp).coerceAtLeast(PLOT_MIN_DP)
+    val content = maxOf(contentMinDp, room - plot)
     val total = fixedDp + 3 * gapDp + plot + content
     return ColumnPlan(plot, content, total, total > availDp + 0.5f)
 }

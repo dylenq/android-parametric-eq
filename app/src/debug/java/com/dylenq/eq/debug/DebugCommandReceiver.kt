@@ -30,6 +30,8 @@ class DebugCommandReceiver : BroadcastReceiver() {
                     val m = if (intent.getStringExtra("value") == "parametric") EqMode.PARAMETRIC else EqMode.GRAPHIC
                     c.edit { it.setMode(m) }
                 }
+                "set-band-count" -> c.edit { it.setGraphicBandCount(intent.getIntExtra("count", 10).toUInt()) }
+                "set-limiter" -> c.edit { it.setLimiterEnabled(on(intent)) }
                 "set-bypass" -> c.setBypass(on(intent))
                 "set-global" -> rt.setGlobalMode(on(intent))
                 "set-start-on-boot" -> rt.setStartOnBoot(on(intent))

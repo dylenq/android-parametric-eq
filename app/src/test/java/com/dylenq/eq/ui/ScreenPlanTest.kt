@@ -58,4 +58,17 @@ class ScreenPlanTest {
         assertFalse(WindowSpec(411, 891, 1f).stackedModeRow)
         assertEquals(56, WindowSpec(800, 360).topBarHeightDp)
     }
+
+    @Test fun panelMinimumGrowsOnlyWithLargeFont() {
+        assertEquals(216f, graphicPanelMinDp(1f, false), 0.01f)
+        assertEquals(169f, graphicPanelMinDp(1f, true), 0.01f)
+        assertTrue(graphicPanelMinDp(2f, false) > graphicPanelMinDp(1.3f, false) - 0.01f)
+        assertEquals(272f, graphicPanelMinDp(2f, false), 0.01f)
+    }
+
+    @Test fun curveChromeFollowsWidthAndFont() {
+        assertEquals(68f, curveChromeDp(1f, 411), 0.01f)
+        assertEquals(84f, curveChromeDp(1f, 360), 0.01f)
+        assertEquals(132f, curveChromeDp(2f, 411), 0.01f)
+    }
 }

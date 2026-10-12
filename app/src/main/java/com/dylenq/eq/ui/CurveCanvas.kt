@@ -67,7 +67,7 @@ fun CurveCanvas(
     val labelStyle = MaterialTheme.typography.labelSmall.copy(
         color = cs.onSurfaceVariant,
         fontFeatureSettings = "tnum",
-    )
+    ).capScale()
     val freqLabels: List<Pair<Float, TextLayoutResult>> = remember(measurer, labelStyle, fontScale) {
         AxisScale.frequencyLabels(fontScale).map { it to measurer.measure(FreqFormat.format(it), labelStyle) }
     }

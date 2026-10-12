@@ -59,14 +59,20 @@ import com.dylenq.eq.R
 private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
 internal val CurveCardTopPad = 4.dp
-internal val CurveHeaderHeight = 40.dp
 
-/** Footer height (UI-SPEC: 24 dp): one labelSmall line; two lines when the font is large. */
-internal fun curveFooterHeight(fontScale: Float) = if (fontScale >= 1.3f) 40.dp else 24.dp
+/** Header height (UI-SPEC: 40 dp); at large font the legend and the chip stack in two 40 dp rows. */
+internal fun curveHeaderHeight(fontScale: Float) = if (fontScale >= 1.3f) 80.dp else 40.dp
 
-/** Everything in the card except the plot, at this font scale (dp). */
-internal fun curveChromeDp(fontScale: Float): Float =
-    CurveCardTopPad.value + CurveHeaderHeight.value + curveFooterHeight(fontScale).value
+/**
+ * Footer height (UI-SPEC: 24 dp), reserved always so the card does not jump when the caption appears.
+ * The caption wraps to two lines below about 400 dp of window width and at large font, so it is taller there.
+ */
+internal fun curveFooterHeight(fontScale: Float, widthDp: Int) =
+    if (fontScale >= 1.3f) 48.dp else if (widthDp < 400) 40.dp else 24.dp
+
+/** Everything in the card except the plot, at this font scale and window width (dp). */
+internal fun curveChromeDp(fontScale: Float, widthDp: Int): Float =
+    CurveCardTopPad.value + curveHeaderHeight(fontScale).value + curveFooterHeight(fontScale, widthDp).value
 
 /** What the card's chrome (legend, chip, caption, semantics) needs; equal values do not recompose. */
 @Immutable
@@ -124,6 +130,8 @@ fun CurveCard(
     plotHeightOverride: androidx.compose.ui.unit.Dp? = null,
     /** The card has a bounded height and the plot takes what the header and footer leave. */
     fillHeight: Boolean = false,
+    /** Footer height; the screen passes the value its chrome estimate used. */
+    footerHeight: androidx.compose.ui.unit.Dp? = null,
 ) {
     val view by remember(state) { derivedStateOf { CurveView.from(state()) } }
     val reduced = rememberReducedMotion()
@@ -141,7 +149,9 @@ fun CurveCard(
 
     var showDialog by rememberSaveable { mutableStateOf(false) }
     val plotHeight = plotHeightOverride ?: defaultPlotHeight(LocalConfiguration.current.screenHeightDp).dp
-    val footerHeight = curveFooterHeight(LocalDensity.current.fontScale)
+    val fontScale = LocalDensity.current.fontScale
+    val footer = footerHeight ?: curveFooterHeight(fontScale, LocalConfiguration.current.screenWidthDp)
+    val headerHeight = curveHeaderHeight(fontScale)
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -151,11 +161,22 @@ fun CurveCard(
         Box(Modifier.then(if (fillHeight) Modifier.fillMaxSize() else Modifier)) {
         Column(Modifier.then(if (fillHeight) Modifier.fillMaxSize() else Modifier).padding(start = 8.dp, end = 8.dp, top = CurveCardTopPad)) {
             // Header: legend and headroom chip (UI-SPEC: 40 dp).
-            Row(Modifier.fillMaxWidth().height(CurveHeaderHeight).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!view.bypass && !view.curveError) {
-                    CurveLegend(showTarget = view.targetVisible)
-                    Spacer(Modifier.weight(1f))
-                    HeadroomChip(view.headroomText, view.headroomSpeech, view.over, onApplySuggested)
+            if (fontScale >= 1.3f) {
+                Column(Modifier.fillMaxWidth().height(headerHeight).padding(horizontal = 8.dp)) {
+                    if (!view.bypass && !view.curveError) {
+                        Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.CenterStart) { CurveLegend(showTarget = view.targetVisible) }
+                        Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.CenterEnd) {
+                            HeadroomChip(view.headroomText, view.headroomSpeech, view.over, onApplySuggested)
+                        }
+                    }
+                }
+            } else {
+                Row(Modifier.fillMaxWidth().height(headerHeight).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (!view.bypass && !view.curveError) {
+                        CurveLegend(showTarget = view.targetVisible)
+                        Spacer(Modifier.weight(1f))
+                        HeadroomChip(view.headroomText, view.headroomSpeech, view.over, onApplySuggested)
+                    }
                 }
             }
 
@@ -196,7 +217,7 @@ fun CurveCard(
             }
 
             // Footer: reserved at one caption line, always, so the card never jumps when the caption appears.
-            Spacer(Modifier.fillMaxWidth().height(footerHeight))
+            Spacer(Modifier.fillMaxWidth().height(footer))
         }
         // The caption is drawn in the footer but its 48 dp touch target reaches up over the plot's
         // axis-label strip (the plot has no gestures in this phase).
@@ -208,14 +229,14 @@ fun CurveCard(
                     .fillMaxWidth()
                     .height(48.dp)
                     .clickable(role = Role.Button, onClickLabel = "About target and actual curves") { showDialog = true }
-                    .padding(start = 16.dp, end = 16.dp, top = 48.dp - footerHeight)
+                    .padding(start = 16.dp, end = 16.dp, top = 48.dp - footer)
                     .testTag("caption"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
                     caption,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.capScale(),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
@@ -245,7 +266,7 @@ fun CurveCard(
 @Composable
 private fun CurveLegend(showTarget: Boolean) {
     val cs = MaterialTheme.colorScheme
-    val style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp)
+    val style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp).capScale()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         if (showTarget) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -278,7 +299,7 @@ private fun HeadroomChip(text: String, speech: String, over: Boolean, onClick: (
             if (over) {
                 Icon(painterResource(R.drawable.ic_warning), contentDescription = null, modifier = Modifier.size(16.dp))
             }
-            Text(text, style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp), maxLines = 1, overflow = TextOverflow.Clip)
+            Text(text, style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp).capScale(), maxLines = 1, overflow = TextOverflow.Clip)
         }
     }
     if (over) {
