@@ -4,6 +4,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -46,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.dylenq.eq.R
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 const val RESET_ALL_MESSAGE = "Sliders and preamp reset"
@@ -63,6 +67,7 @@ fun EqTopBar(
     onBypass: (Boolean) -> Unit,
     onResetAll: () -> Unit,
     modifier: Modifier = Modifier,
+    heightDp: Int = 64,
     phase5Slot: @Composable RowScope.() -> Unit = {},
 ) {
     val s = state()
@@ -70,7 +75,8 @@ fun EqTopBar(
         modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars)
-            .height(64.dp)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .height(heightDp.dp)
             .padding(start = 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -143,6 +149,8 @@ internal suspend fun SnackbarHostState.showTimed(
     message: String,
     durationMs: Long,
     actionLabel: String? = null,
+    /** When this returns the snackbar is dismissed early (the action it offered is no longer valid). */
+    dismissWhen: (suspend () -> Unit)? = null,
     onAction: () -> Unit = {},
 ) {
     coroutineScope {
@@ -150,8 +158,15 @@ internal suspend fun SnackbarHostState.showTimed(
             delay(durationMs)
             currentSnackbarData?.dismiss()
         }
+        val watcher = dismissWhen?.let { w ->
+            launch {
+                w()
+                currentSnackbarData?.dismiss()
+            }
+        }
         val result = showSnackbar(message, actionLabel, duration = SnackbarDuration.Indefinite)
         timer.cancel()
+        watcher?.cancel()
         if (result == SnackbarResult.ActionPerformed) onAction()
     }
 }
@@ -166,7 +181,17 @@ fun rememberResetAll(holder: UiStateHolder, host: SnackbarHostState): () -> Unit
     return remember(holder, host) {
         {
             holder.resetAll()
-            scope.launch { host.showTimed(RESET_ALL_MESSAGE, RESET_SNACKBAR_MS, "Undo") { holder.undo() } }
+            // Undo is only valid while nothing else has been edited since the reset; any later edit,
+            // undo or redo dismisses the snackbar (otherwise Undo would undo that later edit).
+            val serial = holder.editSerial.value
+            scope.launch {
+                host.showTimed(
+                    RESET_ALL_MESSAGE,
+                    RESET_SNACKBAR_MS,
+                    "Undo",
+                    dismissWhen = { holder.editSerial.first { it != serial } },
+                ) { holder.undo() }
+            }
             Unit
         }
     }

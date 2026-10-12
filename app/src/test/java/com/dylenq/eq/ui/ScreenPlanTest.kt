@@ -1,6 +1,8 @@
 package com.dylenq.eq.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Pure layout decisions of the single-column screen. */
@@ -20,12 +22,40 @@ class ScreenPlanTest {
     }
 
     @Test fun plotKeepsItsDefaultWhenTheMinimumsFit() {
-        assertEquals(260f, plotHeightFor(1000, 900f, 1.0f, false), 0f)
-        assertEquals(240f, plotHeightFor(800, 840f, 1.0f, false), 0.01f)
+        val p = planColumn(availDp = 900f, fixedDp = 300f, desiredPlotDp = 240f)
+        assertEquals(240f, p.plotDp, 0f)
+        assertEquals(900f - 300f - 36f - 240f, p.contentDp, 0.01f)
+        assertFalse(p.scrolls)
     }
 
-    @Test fun plotClampsTo168WhenTheColumnWillScroll() {
-        assertEquals(168f, plotHeightFor(640, 540f, 1.0f, false), 0f)
-        assertEquals(168f, plotHeightFor(800, 760f, 2.0f, true), 0f)
+    @Test fun plotShrinksBeforeTheColumnScrolls() {
+        // room = 700 - 300 - 36 = 364; panel minimum 216 leaves 148 for the plot, but the plot never goes below 168.
+        val p = planColumn(availDp = 700f, fixedDp = 300f, desiredPlotDp = 260f)
+        assertEquals(168f, p.plotDp, 0f)
+        val q = planColumn(availDp = 800f, fixedDp = 300f, desiredPlotDp = 260f)
+        assertEquals(800f - 300f - 36f - 216f, q.plotDp, 0.01f)
+        assertEquals(216f, q.contentDp, 0.01f)
+        assertFalse(q.scrolls)
+    }
+
+    @Test fun columnScrollsWhenEvenTheMinimumsDoNotFit() {
+        val p = planColumn(availDp = 600f, fixedDp = 300f, desiredPlotDp = 260f)
+        assertEquals(168f, p.plotDp, 0f)
+        assertEquals(216f, p.contentDp, 0f)
+        assertTrue(p.scrolls)
+        assertEquals(300f + 36f + 168f + 216f, p.totalDp, 0.01f)
+    }
+
+    @Test fun windowSpecClassesFollowTheUiSpec() {
+        assertFalse(WindowSpec(360, 800).twoPane)
+        assertTrue(WindowSpec(800, 360).twoPane)
+        assertTrue(WindowSpec(840, 1200).twoPane)
+        assertFalse(WindowSpec(839, 1200).twoPane)
+        assertEquals(640, WindowSpec(700, 1200).maxContentWidthDp)
+        assertEquals(12, WindowSpec(340, 800).marginDp)
+        assertTrue(WindowSpec(340, 800).stackedModeRow)
+        assertTrue(WindowSpec(411, 891, 2f).stackedModeRow)
+        assertFalse(WindowSpec(411, 891, 1f).stackedModeRow)
+        assertEquals(56, WindowSpec(800, 360).topBarHeightDp)
     }
 }

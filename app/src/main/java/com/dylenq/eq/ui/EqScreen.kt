@@ -4,9 +4,21 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.ScrollState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,47 +36,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dylenq.eq.core.EqMode
 
-/** UI-SPEC: `clamp(30% of window height, 168, 260)` dp. */
-fun defaultPlotHeight(screenHeightDp: Int): Float = (screenHeightDp * 0.30f).coerceIn(168f, 260f)
-
-/** UI-SPEC "Horizontal screen margin": 12 dp below 360 dp, 24 dp from 600 dp, else 16 dp. */
-fun screenMarginDp(widthDp: Int): Int = when {
-    widthDp < 360 -> 12
-    widthDp >= 600 -> 24
-    else -> 16
-}
-
-private const val CONTENT_MIN_DP = 232f
-private const val GAP_DP = 16f
-private const val MAX_CONTENT_WIDTH_DP = 640
+private const val MAX_PORTRAIT_WIDTH_DP = 640
+private const val PANE_GAP_DP = 8f
+private const val LEFT_PANE_FRACTION = 0.44f
+private const val LEFT_PANE_MIN_DP = 280
+private const val RIGHT_PANE_PANEL_MIN_DP = 169f
+private const val LEFT_PANE_PLOT_MIN_DP = 120f
 
 /**
- * Curve plot height for the column. The default is [defaultPlotHeight]; when an estimate of the sum of
- * the region minimums at that height no longer fits [bodyHeightDp], the column will scroll and the plot
- * is clamped to its 168 dp minimum. The estimate scales the text-bearing regions with the font scale
- * (capped at 2); it only decides this clamp, the layout itself measures real heights.
- */
-fun plotHeightFor(screenHeightDp: Int, bodyHeightDp: Float, fontScale: Float, stacked: Boolean): Float {
-    val plot = defaultPlotHeight(screenHeightDp)
-    val fs = fontScale.coerceIn(1f, 2f)
-    val curve = plot + 72f * fs
-    val mode = if (stacked) 104f else 48f
-    val preamp = 152f * fs
-    val sum = curve + mode + CONTENT_MIN_DP + preamp + 3 * GAP_DP
-    return if (sum > bodyHeightDp) 168f else plot
-}
-
-/**
- * The portrait single-column screen (UI-SPEC layout A). Top bar, strip and banner stay pinned; the curve,
- * mode row, mode content and preamp card scroll as one column only when their minimums do not fit.
+ * The screen (UI-SPEC layouts A and B). Portrait: top bar, strip and banner pinned, the curve, mode row,
+ * mode content and preamp card as one column that scrolls only when the minimums do not fit. Landscape or
+ * >= 840 dp: two panes (curve and mode row left, sliders and compact preamp card right), each scrolling
+ * vertically only when its minimums do not fit. [spec] defaults to the real window.
  * [parametricContent] is the Phase 5 slot (the band list replaces the placeholder there).
  */
 @Composable
@@ -76,6 +67,7 @@ fun EqScreen(
     onAllowNotifications: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    spec: WindowSpec = WindowSpec.current(),
     parametricContent: @Composable (EqUiState) -> Unit = { ParametricPlaceholder(it.hasEnabledParametricBands) },
 ) {
     val ui by holder.ui.collectAsStateWithLifecycle()
@@ -83,96 +75,137 @@ fun EqScreen(
     val resetAll = rememberResetAll(holder, snackbar)
     EqErrorSnackbars(holder, snackbar)
     val reduced = rememberReducedMotion()
-    val config = LocalConfiguration.current
-    val fontScale = LocalDensity.current.fontScale
-    val stacked = rememberModeRowStacked()
+    val sliderScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+
+    val strip: @Composable () -> Unit = { StatusStrip({ ui }, onStart = onStartService) }
+    val banner: @Composable () -> Unit = {
+        BannerSlot(
+            notice = ui.notice,
+            permissionGranted = notificationsGranted,
+            prefs = prefs,
+            onDismissNotice = holder::dismissNotice,
+            onAllow = onAllowNotifications,
+            onOpenNotificationSettings = onOpenNotificationSettings,
+        )
+    }
+    val mode: @Composable () -> Unit = {
+        ModeRow(ui.mode, ui.graphicBandCount, holder::setMode, holder::setBandCount, stacked = spec.stackedModeRow)
+    }
+    val modeContent: @Composable (Boolean) -> Unit = { compact ->
+        // Phase 5 slot: ParametricBandList is `parametricContent`.
+        Crossfade(
+            targetState = ui.mode,
+            animationSpec = if (reduced) snap() else tween(200),
+            label = "mode",
+            modifier = Modifier.fillMaxSize(),
+        ) { m ->
+            if (m == EqMode.GRAPHIC) {
+                GraphicSliderPanel(
+                    state = { ui },
+                    onDragStart = holder::onBandDragStart,
+                    onChange = holder::onBandDragChange,
+                    onDragEnd = holder::onBandDragEnd,
+                    onReset = holder::resetBand,
+                    modifier = Modifier.fillMaxSize(),
+                    compact = compact,
+                    scroll = sliderScroll,
+                )
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { parametricContent(ui) }
+            }
+        }
+    }
+    val preamp: @Composable (Boolean) -> Unit = { compact ->
+        PreampCard(
+            state = { ui },
+            onPreamp = holder::setPreamp,
+            onDragStart = holder::preampDragStart,
+            onDragEnd = holder::preampDragEnd,
+            onReset = holder::resetPreamp,
+            onApplySuggested = holder::applySuggestedPreamp,
+            onLimiter = holder::setLimiter,
+            compact = compact,
+        )
+    }
 
     Scaffold(
         modifier = modifier,
         containerColor = MaterialTheme.colorScheme.surface,
+        contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             // Phase 5 slot: Undo/Redo icon buttons go in EqTopBar's phase5Slot.
-            EqTopBar({ ui }, holder::setBypass, resetAll)
+            EqTopBar({ ui }, holder::setBypass, resetAll, heightDp = spec.topBarHeightDp)
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { pad ->
-        BoxWithConstraints(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            val margin = screenMarginDp(config.screenWidthDp).dp
-            val bodyHeight = maxHeight
-            Column(
-                Modifier
-                    .widthIn(max = MAX_CONTENT_WIDTH_DP.dp)
-                    .fillMaxSize()
-                    .padding(horizontal = margin),
-            ) {
-                StatusStrip({ ui }, onStart = onStartService)
-                BannerSlot(
-                    notice = ui.notice,
-                    permissionGranted = notificationsGranted,
-                    prefs = prefs,
-                    onDismissNotice = holder::dismissNotice,
-                    onAllow = onAllowNotifications,
-                    onOpenNotificationSettings = onOpenNotificationSettings,
-                )
-                val plot = plotHeightFor(config.screenHeightDp, bodyHeight.value, fontScale, stacked).dp
-                val scroll = rememberScrollState()
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-                    val avail = maxHeight
-                    SingleColumn(
-                        availableHeight = avail,
-                        modifier = Modifier.verticalScroll(scroll).testTag("eq-column"),
-                        curve = { CurveCard({ ui }, holder::applySuggestedPreamp, plotHeightOverride = plot) },
-                        mode = { ModeRow(ui.mode, ui.graphicBandCount, holder::setMode, holder::setBandCount, stacked = stacked) },
-                        content = {
-                            // Phase 5 slot: ParametricBandList is `parametricContent`.
-                            Crossfade(
-                                targetState = ui.mode,
-                                animationSpec = if (reduced) snap() else tween(200),
-                                label = "mode",
-                                modifier = Modifier.fillMaxSize(),
-                            ) { m ->
-                                if (m == EqMode.GRAPHIC) {
-                                    GraphicSliderPanel(
-                                        state = { ui },
-                                        onDragStart = holder::onBandDragStart,
-                                        onChange = holder::onBandDragChange,
-                                        onDragEnd = holder::onBandDragEnd,
-                                        onReset = holder::resetBand,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                } else {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { parametricContent(ui) }
-                                }
-                            }
-                        },
-                        preamp = {
-                            PreampCard(
-                                state = { ui },
-                                onPreamp = holder::setPreamp,
-                                onDragStart = holder::preampDragStart,
-                                onDragEnd = holder::preampDragEnd,
-                                onReset = holder::resetPreamp,
-                                onApplySuggested = holder::applySuggestedPreamp,
-                                onLimiter = holder::setLimiter,
-                            )
-                        },
+        val margin = spec.marginDp.dp
+        if (!spec.twoPane) {
+            BoxWithConstraints(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                Column(
+                    Modifier
+                        .widthIn(max = MAX_PORTRAIT_WIDTH_DP.dp)
+                        .fillMaxSize()
+                        .padding(horizontal = margin),
+                ) {
+                    strip()
+                    banner()
+                    val scroll = rememberScrollState()
+                    BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                        SingleColumn(
+                            availablePx = constraints.maxHeight,
+                            desiredPlotDp = defaultPlotHeight(spec.heightDp),
+                            chromeDp = curveChromeDp(spec.fontScale),
+                            modifier = Modifier.verticalScroll(scroll).testTag("eq-column"),
+                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true) },
+                            mode = mode,
+                            content = { modeContent(false) },
+                            preamp = { preamp(false) },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        } else {
+            Row(Modifier.padding(pad).fillMaxSize().padding(horizontal = margin).testTag("two-pane")) {
+                BoxWithConstraints(Modifier.weight(LEFT_PANE_FRACTION).widthIn(min = LEFT_PANE_MIN_DP.dp).fillMaxHeight().testTag("left-pane")) {
+                    FlexColumn(
+                        availableHeight = maxHeight,
+                        flexIndex = 2,
+                        flexMinDp = curveChromeDp(spec.fontScale) + LEFT_PANE_PLOT_MIN_DP,
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        slots = listOf(
+                            strip,
+                            banner,
+                            { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true) },
+                            mode,
+                        ),
                     )
                 }
-                // Bottom padding; the navigation-bar inset is already in the Scaffold padding.
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.width(16.dp))
+                BoxWithConstraints(Modifier.weight(1f - LEFT_PANE_FRACTION).fillMaxHeight().testTag("right-pane")) {
+                    FlexColumn(
+                        availableHeight = maxHeight,
+                        flexIndex = 0,
+                        flexMinDp = RIGHT_PANE_PANEL_MIN_DP,
+                        modifier = Modifier.verticalScroll(rememberScrollState()).testTag("right-pane-scroll"),
+                        slots = listOf({ modeContent(true) }, { preamp(true) }),
+                    )
+                }
             }
         }
     }
 }
 
 /**
- * Stacks [curve], [mode], [content] and [preamp] with 16 dp gaps. [content] gets whatever is left of
- * [availableHeight] but never less than 232 dp; when the four do not fit, the layout is taller than
- * [availableHeight] and the caller's `verticalScroll` takes over.
+ * Stacks the four portrait regions with 12 dp gaps. The curve plot and the slider panel share what the
+ * mode row and preamp card leave ([planColumn]); when even the minimums do not fit [availableHeight],
+ * the layout is taller than it and the caller's `verticalScroll` takes over.
  */
 @Composable
 private fun SingleColumn(
-    availableHeight: Dp,
+    availablePx: Int,
+    desiredPlotDp: Float,
+    chromeDp: Float,
     modifier: Modifier,
     curve: @Composable () -> Unit,
     mode: @Composable () -> Unit,
@@ -189,25 +222,71 @@ private fun SingleColumn(
         modifier = modifier,
     ) { measurables, constraints ->
         val w = constraints.maxWidth
-        val loose = androidx.compose.ui.unit.Constraints(minWidth = w, maxWidth = w)
-        val gap = GAP_DP.dp.roundToPx()
-        val avail = availableHeight.roundToPx()
-        val curveP = measurables[0].measure(loose)
+        val loose = Constraints(minWidth = w, maxWidth = w)
+        val d = density
         val modeP = measurables[1].measure(loose)
         val preampP = measurables[3].measure(loose)
-        val fixed = curveP.height + modeP.height + preampP.height + 3 * gap
-        val min = CONTENT_MIN_DP.dp.roundToPx()
-        val contentH = maxOf(min, avail - fixed)
-        val contentP = measurables[2].measure(
-            androidx.compose.ui.unit.Constraints(minWidth = w, maxWidth = w, minHeight = contentH, maxHeight = contentH),
-        )
-        val total = fixed + contentH
+        val fixedDp = (modeP.height + preampP.height) / d + chromeDp
+        val plan = planColumn(availablePx / d, fixedDp, desiredPlotDp)
+        val gap = (COLUMN_GAP_DP * d).roundToInt()
+        val minContentPx = (CONTENT_MIN_DP * d).roundToInt()
+        var curveH = ((chromeDp + plan.plotDp) * d).roundToInt()
+        // Whole pixels: when it all fits, rounding must not push the panel under its minimum (that would scroll).
+        if (!plan.scrolls) curveH = minOf(curveH, availablePx - modeP.height - preampP.height - 3 * gap - minContentPx)
+        // In whole pixels: when everything fits, the panel takes exactly what is left (no rounding overflow).
+        val contentH = if (plan.scrolls) {
+            minContentPx
+        } else {
+            maxOf(minContentPx, availablePx - curveH - modeP.height - preampP.height - 3 * gap)
+        }
+        val curveP = measurables[0].measure(Constraints(w, w, curveH, curveH))
+        val contentP = measurables[2].measure(Constraints(w, w, contentH, contentH))
+        val total = curveP.height + modeP.height + contentP.height + preampP.height + 3 * gap
         layout(w, total) {
             var y = 0
             curveP.place(0, y); y += curveP.height + gap
             modeP.place(0, y); y += modeP.height + gap
             contentP.place(0, y); y += contentP.height + gap
             preampP.place(0, y)
+        }
+    }
+}
+
+/**
+ * Vertical stack of [slots] with 8 dp gaps between non-empty ones; the slot at [flexIndex] gets whatever
+ * is left of [availableHeight] but never less than [flexMinDp] (the layout is then taller and the
+ * caller's `verticalScroll` takes over).
+ */
+@Composable
+private fun FlexColumn(
+    availableHeight: Dp,
+    flexIndex: Int,
+    flexMinDp: Float,
+    modifier: Modifier,
+    slots: List<@Composable () -> Unit>,
+) {
+    Layout(
+        content = { slots.forEach { slot -> Box { slot() } } },
+        modifier = modifier,
+    ) { measurables, constraints ->
+        val w = constraints.maxWidth
+        val loose = Constraints(minWidth = w, maxWidth = w)
+        val gap = (PANE_GAP_DP * density).roundToInt()
+        val avail = availableHeight.roundToPx()
+        val fixed = measurables.mapIndexed { i, m -> if (i == flexIndex) null else m.measure(loose) }
+        val nonEmpty = measurables.indices.count { i -> i == flexIndex || fixed[i]!!.height > 0 }
+        val used = fixed.filterNotNull().sumOf { it.height } + gap * (nonEmpty - 1)
+        val flexH = maxOf((flexMinDp * density).roundToInt(), avail - used)
+        val flexP = measurables[flexIndex].measure(Constraints(w, w, flexH, flexH))
+        val placed = measurables.indices.map { i -> if (i == flexIndex) flexP else fixed[i]!! }
+        val total = placed.sumOf { it.height } + gap * (nonEmpty - 1)
+        layout(w, total) {
+            var y = 0
+            for (p in placed) {
+                if (p.height == 0) continue
+                p.place(0, y)
+                y += p.height + gap
+            }
         }
     }
 }

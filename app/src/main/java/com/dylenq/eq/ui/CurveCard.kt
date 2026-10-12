@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -40,6 +41,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -55,6 +57,16 @@ import com.dylenq.eq.R
 
 /** Material emphasized easing, used for the Y-window rescale (UI-SPEC "Motion"). */
 private val EmphasizedEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+
+internal val CurveCardTopPad = 4.dp
+internal val CurveHeaderHeight = 40.dp
+
+/** Footer height (UI-SPEC: 24 dp): one labelSmall line; two lines when the font is large. */
+internal fun curveFooterHeight(fontScale: Float) = if (fontScale >= 1.3f) 40.dp else 24.dp
+
+/** Everything in the card except the plot, at this font scale (dp). */
+internal fun curveChromeDp(fontScale: Float): Float =
+    CurveCardTopPad.value + CurveHeaderHeight.value + curveFooterHeight(fontScale).value
 
 /** What the card's chrome (legend, chip, caption, semantics) needs; equal values do not recompose. */
 @Immutable
@@ -110,6 +122,8 @@ fun CurveCard(
     modifier: Modifier = Modifier,
     /** Plot height; null uses 30% of the window height clamped to 168-260 dp (UI-SPEC). */
     plotHeightOverride: androidx.compose.ui.unit.Dp? = null,
+    /** The card has a bounded height and the plot takes what the header and footer leave. */
+    fillHeight: Boolean = false,
 ) {
     val view by remember(state) { derivedStateOf { CurveView.from(state()) } }
     val reduced = rememberReducedMotion()
@@ -127,15 +141,17 @@ fun CurveCard(
 
     var showDialog by rememberSaveable { mutableStateOf(false) }
     val plotHeight = plotHeightOverride ?: defaultPlotHeight(LocalConfiguration.current.screenHeightDp).dp
+    val footerHeight = curveFooterHeight(LocalDensity.current.fontScale)
 
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 4.dp)) {
-            // Header: legend and headroom chip. 48 dp so the chip is a full touch target.
-            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.then(if (fillHeight) Modifier.fillMaxSize() else Modifier)) {
+        Column(Modifier.then(if (fillHeight) Modifier.fillMaxSize() else Modifier).padding(start = 8.dp, end = 8.dp, top = CurveCardTopPad)) {
+            // Header: legend and headroom chip (UI-SPEC: 40 dp).
+            Row(Modifier.fillMaxWidth().height(CurveHeaderHeight).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (!view.bypass && !view.curveError) {
                     CurveLegend(showTarget = view.targetVisible)
                     Spacer(Modifier.weight(1f))
@@ -143,7 +159,7 @@ fun CurveCard(
                 }
             }
 
-            Box(Modifier.fillMaxWidth().height(plotHeight)) {
+            Box(Modifier.fillMaxWidth().then(if (fillHeight) Modifier.weight(1f) else Modifier.height(plotHeight))) {
                 CurveCanvas(
                     state = state,
                     yWindow = { anim.value },
@@ -179,35 +195,38 @@ fun CurveCard(
                 }
             }
 
-            // Footer: always the same height so the card never jumps; a button only with a caption.
-            Box(Modifier.fillMaxWidth().height(48.dp), contentAlignment = Alignment.CenterStart) {
-                val caption = view.caption
-                if (caption != null) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .clickable(role = Role.Button, onClickLabel = "About target and actual curves") { showDialog = true }
-                            .padding(horizontal = 8.dp)
-                            .testTag("caption"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Text(
-                            caption,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Icon(
-                            painterResource(R.drawable.ic_info),
-                            contentDescription = "About target and actual curves",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                }
+            // Footer: reserved at one caption line, always, so the card never jumps when the caption appears.
+            Spacer(Modifier.fillMaxWidth().height(footerHeight))
+        }
+        // The caption is drawn in the footer but its 48 dp touch target reaches up over the plot's
+        // axis-label strip (the plot has no gestures in this phase).
+        val caption = view.caption
+        if (caption != null) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .clickable(role = Role.Button, onClickLabel = "About target and actual curves") { showDialog = true }
+                    .padding(start = 16.dp, end = 16.dp, top = 48.dp - footerHeight)
+                    .testTag("caption"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    caption,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    painterResource(R.drawable.ic_info),
+                    contentDescription = "About target and actual curves",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
             }
+        }
         }
     }
 

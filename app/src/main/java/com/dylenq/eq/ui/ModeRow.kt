@@ -27,9 +27,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import com.dylenq.eq.core.EqMode
 
-/** True when the mode row stacks: a narrow window (320-359 dp) or font scale 1.3 and up. */
-fun modeRowStacked(screenWidthDp: Int, fontScale: Float): Boolean = screenWidthDp < 360 || fontScale >= 1.3f
-
 @Composable
 fun rememberModeRowStacked(): Boolean =
     modeRowStacked(LocalConfiguration.current.screenWidthDp, LocalDensity.current.fontScale)

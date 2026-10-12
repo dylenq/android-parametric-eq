@@ -66,6 +66,7 @@ private val ScaleWidth = 32.dp
 private val ScrollEndPadding = 8.dp
 private val FadeWidth = 24.dp
 private val MinTrack = 160.dp
+private val MinTrackCompact = 121.dp
 private val ThumbInsetDp = 14.dp
 
 private const val HINT = "Drag a slider. Double-tap to reset it."
@@ -84,12 +85,16 @@ fun GraphicSliderPanel(
     onDragEnd: () -> Unit,
     onReset: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    /** Landscape form: tracks may shrink to 120 dp and the card has no vertical padding (168 dp minimum). */
+    compact: Boolean = false,
+    /** Horizontal scroll of the slider row; hoisted by the screen so it survives Graphic -> Parametric -> Graphic. */
+    scroll: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
 ) {
+    val minTrack = if (compact) MinTrackCompact else MinTrack
     val bandCount by remember { derivedStateOf { state().graphicBandCount } }
     val bypass by remember { derivedStateOf { state().bypass } }
     val reduced = rememberReducedMotion()
     val fontScale = LocalDensity.current.fontScale
-    val scroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
     var seenCount by rememberSaveable { mutableIntStateOf(bandCount) }
     LaunchedEffect(bandCount) {
         if (bandCount != seenCount) {
@@ -106,9 +111,9 @@ fun GraphicSliderPanel(
         colors = CardDefaults.cardColors(containerColor = cardColor),
     ) {
         Box(Modifier.fillMaxSize()) {
-            Column(Modifier.fillMaxSize().padding(horizontal = 8.dp).alpha(if (bypass) 0.6f else 1f)) {
+            Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = if (compact) 0.dp else 4.dp).alpha(if (bypass) 0.6f else 1f)) {
                 ReadoutBar(state)
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().heightIn(min = MinTrack + LabelRow + LabelGap)) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().heightIn(min = minTrack + LabelRow + LabelGap)) {
                     val rowWidth = maxWidth - ScaleWidth
                     val showLabels = SliderMath.showsGainLabel(SliderMath.columnPitch(rowWidth.value, bandCount, fontScale))
                     Row(Modifier.fillMaxSize()) {

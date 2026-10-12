@@ -56,7 +56,6 @@ import androidx.compose.ui.semantics.text
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 import kotlin.math.abs
 
 internal const val PREAMP_MIN_DB = -24f
@@ -69,7 +68,7 @@ const val LIMITER_DESCRIPTION = "Eases sustained loud sections. It can't catch s
 private val Tnum = TextStyle(fontFeatureSettings = "tnum")
 
 /** "Over by 2.5 dB" magnitude of a negative headroom. */
-internal fun overBy(headroomDb: Float): String = String.format(Locale.US, "%.1f", -headroomDb)
+internal fun overBy(headroomDb: Float): String = DbFormat.magnitude(-headroomDb)
 
 /** The suggested-preamp chip is shown when it would change the preamp by at least 0.5 dB. */
 internal fun showsSuggestion(suggestedDb: Float, preampDb: Float): Boolean =
@@ -131,7 +130,7 @@ fun PreampCard(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     ) {
-        Column(Modifier.padding(if (compact) 8.dp else 16.dp)) {
+        Column(Modifier.padding(horizontal = if (compact) 8.dp else 16.dp, vertical = if (compact) 4.dp else 8.dp)) {
             // Row 1: label, slider, value pill.
             Row(
                 Modifier.fillMaxWidth().heightIn(min = 48.dp),
@@ -190,7 +189,10 @@ fun PreampCard(
                 PreampPill(s.preampDb, onReset)
             }
 
-            if (!compact) SuggestedRow(s, onApplySuggested)
+            // Compact (landscape): two rows; the suggested row only appears when there is something to suggest.
+            if (!compact || showsSuggestion(s.suggestedPreampDb, s.preampDb) || s.headroomAfterPreampDb < -0.05f) {
+                SuggestedRow(s, onApplySuggested, showHeadroom = !compact)
+            }
             LimiterRow(s.limiterEnabled, onLimiter, compact)
         }
     }
@@ -291,7 +293,7 @@ private fun PreampPill(preampDb: Float, onReset: () -> Unit) {
 
 /** Chip when a suggestion would change the preamp, else helper text; an over-the-limit error replaces the helper. */
 @Composable
-private fun SuggestedRow(s: EqUiState, onApply: () -> Unit) {
+private fun SuggestedRow(s: EqUiState, onApply: () -> Unit, showHeadroom: Boolean = true) {
     val chip = showsSuggestion(s.suggestedPreampDb, s.preampDb)
     val over = s.headroomAfterPreampDb < -0.05f
     Row(
@@ -313,9 +315,9 @@ private fun SuggestedRow(s: EqUiState, onApply: () -> Unit) {
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.weight(1f).testTag("over-by"),
             )
-        } else if (!chip) {
+        } else if (!chip && showHeadroom) {
             Text(
-                "Headroom ${String.format(Locale.US, "%.1f", s.headroomAfterPreampDb)} dB",
+                "Headroom ${DbFormat.magnitude(s.headroomAfterPreampDb.coerceAtLeast(0f))} dB",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.testTag("headroom"),
@@ -329,7 +331,7 @@ private fun LimiterRow(on: Boolean, onChange: (Boolean) -> Unit, compact: Boolea
     Row(
         Modifier
             .fillMaxWidth()
-            .heightIn(min = 56.dp)
+            .heightIn(min = 48.dp)
             .testTag("limiter-row")
             .toggleable(value = on, role = Role.Switch, onValueChange = onChange)
             .padding(top = if (compact) 0.dp else 4.dp),
