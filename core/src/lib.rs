@@ -6,6 +6,7 @@ uniffi::setup_scaffolding!();
 
 pub mod achieved;
 pub mod dsp;
+pub mod fit;
 pub mod graphic;
 pub mod grid;
 pub mod history;
