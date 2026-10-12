@@ -39,7 +39,7 @@ pub fn fit(grid: &Grid, target: impl Fn(f64) -> f64) -> Vec<f64> {
 /// Target closure for a parametric state: sum of enabled bands, preamp excluded. Same maths as
 /// `dsp::response::total_db`, kept in f64 end to end (total_db narrows to f32, which would cost
 /// about 1e-6 dB against the Python oracle).
-pub fn parametric_target(state: &EqState, sample_rate: f64) -> impl Fn(f64) -> f64 {
+pub fn parametric_target(state: &EqState, sample_rate: f64) -> impl Fn(f64) -> f64 + use<> {
     let coeffs: Vec<Coeffs> = state
         .bands
         .iter()
