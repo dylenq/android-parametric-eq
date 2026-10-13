@@ -17,6 +17,11 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.up
+import androidx.compose.ui.test.moveBy
+import androidx.compose.ui.test.doubleClick
+import androidx.compose.ui.test.down
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.input.key.Key
@@ -330,5 +335,128 @@ class UndoRedoTest {
         compose.waitUntil(8_000) { !gone("All bands removed") }
         waitGone("Band 4 deleted")
         assertEquals(1, compose.onAllNodesWithText("Undo").fetchSemanticsNodes().size)
+    }
+
+    // ----- Task 3: behaviour on the real screen -----
+
+    private val density get() = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+    private val layer get() = compose.onNodeWithTag("curve-interaction")
+
+    private fun plot(): androidx.compose.ui.geometry.Rect {
+        val size = layer.fetchSemanticsNode().size
+        return PlotGeometry.plotRect(size.width.toFloat(), size.height.toFloat(), density)
+    }
+
+    private fun nodeCenter(index: Int): androidx.compose.ui.geometry.Offset {
+        val b = ctrl.snapshot().bands[index]
+        return ParametricMath.nodePosition(b.freq, b.gainDb, b.kind.hasGain(), plot(), AxisScale.PARAMETRIC_Y_HALF_SPAN_DB)
+    }
+
+    @Test fun aDragIsUndoneAsOneStepFromTheTopBar() {
+        launch(EqMode.PARAMETRIC)
+        val original = ctrl.snapshot().bands[3]
+        val start = nodeCenter(3)
+        layer.performTouchInput {
+            down(start)
+            repeat(6) { moveBy(androidx.compose.ui.geometry.Offset(8f * density, -6f * density)) }
+            up()
+        }
+        compose.waitForIdle()
+        val moved = ctrl.snapshot().bands[3]
+        assertTrue("the node moved", moved.freq != original.freq && moved.gainDb != original.gainDb)
+        compose.onNodeWithTag("undo").assertIsEnabled()
+        compose.onNodeWithTag("undo").performClick()
+        compose.waitForIdle()
+        assertEquals("one tap restores the exact original band", original, ctrl.snapshot().bands[3])
+        compose.onNodeWithTag("undo").assertIsNotEnabled()
+        compose.onNodeWithTag("redo").assertIsEnabled()
+    }
+
+    @Test fun undoIsDisabledAndInertWhileADragIsInProgress() {
+        launch(EqMode.PARAMETRIC)
+        editParametric() // gives Undo something to do
+        val start = nodeCenter(4)
+        val during: com.dylenq.eq.core.Band
+        layer.performTouchInput {
+            down(start)
+            repeat(4) { moveBy(androidx.compose.ui.geometry.Offset(6f * density, -5f * density)) }
+        }
+        compose.waitForIdle()
+        assertTrue("a gesture is open", holder.ui.value.gestureOpen)
+        compose.onNodeWithTag("undo").assertIsNotEnabled()
+        compose.onNodeWithTag("redo").assertIsNotEnabled()
+        during = ctrl.snapshot().bands[4]
+        holder.undo()
+        holder.redo()
+        compose.waitForIdle()
+        assertEquals("undo and redo changed nothing mid-gesture", during, ctrl.snapshot().bands[4])
+        assertEquals("the earlier edit is still applied", com.dylenq.eq.core.FilterKind.HIGH_SHELF, ctrl.snapshot().bands[2].kind)
+        layer.performTouchInput { up() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("undo").assertIsEnabled()
+    }
+
+    @Test fun removeAllThenSnackbarUndoThenTopBarRedoRemovesThemAgain() {
+        launch(EqMode.PARAMETRIC)
+        val before = ctrl.snapshot().bands
+        holder.removeAllBands()
+        compose.waitForIdle()
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitForIdle()
+        assertEquals(before, ctrl.snapshot().bands)
+        compose.onNodeWithTag("redo").performClick()
+        compose.waitForIdle()
+        assertEquals(0, ctrl.snapshot().bands.size)
+        holder.setPreamp(-1f)
+        compose.waitForIdle()
+        assertTrue("no stale snackbar remains", gone("All bands removed"))
+    }
+
+    private fun selectedOverlay() = holder.ui.value.curve?.selectedBandDb
+
+    @Test fun undoingAnAddClearsTheSelectionAndTheOverlay() {
+        launch(EqMode.PARAMETRIC)
+        val p = plot()
+        val spot = androidx.compose.ui.geometry.Offset(p.left + p.width * 0.62f, p.top + p.height * 0.15f)
+        layer.performTouchInput { doubleClick(spot) }
+        compose.waitForIdle()
+        assertEquals(8, ctrl.snapshot().bands.size)
+        assertEquals("the added band is selected", 7, holder.ui.value.selectedBand)
+        compose.waitUntil(5_000) { selectedOverlay() != null }
+        compose.onNodeWithTag("undo").performClick()
+        compose.waitForIdle()
+        assertEquals(7, ctrl.snapshot().bands.size)
+        assertEquals("the index no longer exists: selection cleared", null, holder.ui.value.selectedBand)
+        compose.waitUntil(5_000) { selectedOverlay() == null }
+        compose.onNodeWithTag("redo").performClick()
+        compose.waitForIdle()
+        assertEquals(8, ctrl.snapshot().bands.size)
+        val sel = holder.ui.value.selectedBand
+        assertTrue("selection after redo is null or a valid index: $sel", sel == null || sel in 0 until 8)
+    }
+
+    /**
+     * L-07 / v1 limitation, pinned as fact: Graphic and Parametric share ONE linear history. A Graphic gain edit,
+     * a switch to Parametric, then Undo reverts the Graphic gain even though it is not on screen (an invisible step
+     * in Parametric). The mode switch itself is not a history step. Documented in plan 12.
+     */
+    @Test fun crossModeUndoRevertsTheOtherModesEdit_L07() {
+        launch(EqMode.GRAPHIC)
+        editGraphic()
+        assertEquals(4f, ctrl.snapshot().graphicGainsDb[0], 0.01f)
+        holder.setMode(EqMode.PARAMETRIC)
+        compose.waitForIdle()
+        assertEquals(EqMode.PARAMETRIC, ctrl.snapshot().mode)
+        compose.onNodeWithTag("undo").assertIsEnabled()
+        compose.onNodeWithTag("undo").performClick()
+        compose.waitForIdle()
+        assertEquals("the Graphic edit was undone from Parametric", 0f, ctrl.snapshot().graphicGainsDb[0], 0.01f)
+        assertEquals("and the mode stayed Parametric", EqMode.PARAMETRIC, ctrl.snapshot().mode)
+        // Switching back and redoing from Graphic re-applies the same Graphic edit: one history, both directions.
+        holder.setMode(EqMode.GRAPHIC)
+        compose.waitForIdle()
+        compose.onNodeWithTag("redo").performClick()
+        compose.waitForIdle()
+        assertEquals("redo re-applies the Graphic edit", 4f, ctrl.snapshot().graphicGainsDb[0], 0.01f)
     }
 }

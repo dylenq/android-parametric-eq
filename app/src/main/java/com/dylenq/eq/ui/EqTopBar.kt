@@ -1,6 +1,7 @@
 package com.dylenq.eq.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -175,30 +176,32 @@ fun EqualizerToggle(on: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier
 @Composable
 private fun OverflowMenu(canReset: Boolean, onResetAll: () -> Unit, onOpenSettings: () -> Unit) {
     var open by remember { mutableStateOf(false) }
-    IconButton(
-        onClick = { open = true },
-        modifier = Modifier.size(48.dp).testTag("overflow").semantics { contentDescription = "More options" },
-    ) {
-        Icon(painterResource(R.drawable.ic_more_vert), contentDescription = null)
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-        DropdownMenuItem(
-            text = { Text("Reset all") },
-            enabled = canReset,
-            onClick = {
-                open = false
-                onResetAll()
-            },
-            modifier = Modifier.testTag("reset-all"),
-        )
-        DropdownMenuItem(
-            text = { Text("Settings") },
-            onClick = {
-                open = false
-                onOpenSettings()
-            },
-            modifier = Modifier.height(48.dp).testTag("settings-item"),
-        )
+    Box {
+        IconButton(
+            onClick = { open = true },
+            modifier = Modifier.size(48.dp).testTag("overflow").semantics { contentDescription = "More options" },
+        ) {
+            Icon(painterResource(R.drawable.ic_more_vert), contentDescription = null)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Reset all") },
+                enabled = canReset,
+                onClick = {
+                    open = false
+                    onResetAll()
+                },
+                modifier = Modifier.testTag("reset-all"),
+            )
+            DropdownMenuItem(
+                text = { Text("Settings") },
+                onClick = {
+                    open = false
+                    onOpenSettings()
+                },
+                modifier = Modifier.height(48.dp).testTag("settings-item"),
+            )
+        }
     }
 }
 
