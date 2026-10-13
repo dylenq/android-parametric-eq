@@ -67,6 +67,19 @@ for v in "${VARIANTS[@]}"; do
   fi
 done
 
+# Warm the stub: the first broadcast to a just-installed playerstub cold-starts it and was seen delivered about
+# 6 s late (harness artefact, plan 05-12 smoke: session_at_kill cycle 1 read sessions=0 because OPEN reached the
+# app after dump-state; warm cycles were fine). Send a CLOSE for an unused session and wait for the stub process.
+warm_stub() {
+  "$ADB" shell am broadcast -n "$STUB_RCV" -a "$STUB_ACT" --ei session 7999 --ei open 0 >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do
+    "$ADB" shell pidof "$STUB" 2>/dev/null | tr -d '\r' | grep -q '[0-9]' && break
+    sleep 0.5
+  done
+  sleep 3
+}
+for v in "${VARIANTS[@]}"; do is_session_variant "$v" && { warm_stub; break; }; done
+
 # stub_bc <session> <open 1|0> : the device-side broadcast command text
 # pattern: am broadcast -n com.dylenq.playerstub/.TriggerReceiver -a com.dylenq.playerstub.SEND --ei session N --ei open 1
 stub_bc() { echo "am broadcast -n $STUB_RCV -a $STUB_ACT --ei session $1 --ei open $2 >/dev/null 2>&1"; }
