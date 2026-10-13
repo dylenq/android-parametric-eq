@@ -238,14 +238,14 @@ fun EqScreen(
                         SingleColumn(
                             availablePx = constraints.maxHeight,
                             desiredPlotDp = defaultPlotHeight(spec.heightDp),
-                            chromeDp = curveChromeDp(spec.fontScale, spec.widthDp),
+                            chromeDp = curveChromeDp(spec.fontScale, spec.widthDp, parametric),
                             contentMinDp = graphicPanelMinDp(spec.fontScale, compact = false, tight = spec.tight),
                             plotMinDp = if (spec.tight) PLOT_MIN_TIGHT_DP else PLOT_MIN_DP,
                             parametric = parametric,
                             imeCompact = imeCompact,
                             parametricPlotDp = parametricPlotHeight(spec.heightDp),
                             modifier = Modifier.verticalScroll(scroll).testTag("eq-column"),
-                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp), parametric = parametricActions, compact = imeCompact) },
+                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp, parametric), parametric = parametricActions, compact = imeCompact) },
                             mode = mode,
                             content = { modeContent(false) },
                             // Parametric: the preamp card is the last item of the band list.
@@ -263,12 +263,12 @@ fun EqScreen(
                         flexIndex = 2,
                         flexMinDp = when {
                             imeCompact -> CurveCardTopPad.value + IME_PLOT_DP
-                            landscapePeq -> curveChromeDp(spec.fontScale, spec.widthDp) - (curveHeaderHeight(spec.fontScale).value - landscapeHeaderDp(spec.fontScale)) + PEQ_LANDSCAPE_PLOT_MIN_DP
-                            parametric -> curveChromeDp(spec.fontScale, spec.widthDp) + PEQ_TWO_PANE_PLOT_MIN_DP
-                            else -> curveChromeDp(spec.fontScale, spec.widthDp) + LEFT_PANE_PLOT_MIN_DP
+                            landscapePeq -> curveChromeDp(spec.fontScale, spec.widthDp, parametric) - (curveHeaderHeight(spec.fontScale).value - landscapeHeaderDp(spec.fontScale)) + PEQ_LANDSCAPE_PLOT_MIN_DP
+                            parametric -> curveChromeDp(spec.fontScale, spec.widthDp, parametric) + PEQ_TWO_PANE_PLOT_MIN_DP
+                            else -> curveChromeDp(spec.fontScale, spec.widthDp, parametric) + LEFT_PANE_PLOT_MIN_DP
                         },
                         flexMaxDp = if (parametric && !landscapePeq && !imeCompact) {
-                            curveChromeDp(spec.fontScale, spec.widthDp) + PEQ_TWO_PANE_PLOT_MAX_DP
+                            curveChromeDp(spec.fontScale, spec.widthDp, parametric) + PEQ_TWO_PANE_PLOT_MAX_DP
                         } else {
                             Float.MAX_VALUE
                         },
@@ -279,7 +279,7 @@ fun EqScreen(
                             {
                                 CurveCard(
                                     { ui }, holder::applySuggestedPreamp, fillHeight = true,
-                                    footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp), parametric = parametricActions,
+                                    footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp, parametric), parametric = parametricActions,
                                     compact = imeCompact,
                                     headerHeightOverride = if (landscapePeq) PEQ_LANDSCAPE_HEADER else null,
                                     dropEmptyFooter = landscapePeq,

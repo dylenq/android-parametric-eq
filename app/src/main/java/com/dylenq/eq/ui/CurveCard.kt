@@ -68,12 +68,18 @@ internal fun curveHeaderHeight(fontScale: Float) = if (fontScale >= 1.3f) 80.dp 
  * Footer height (UI-SPEC: 24 dp), reserved always so the card does not jump when the caption appears.
  * The caption wraps to two lines below about 400 dp of window width and at large font, so it is taller there.
  */
-internal fun curveFooterHeight(fontScale: Float, widthDp: Int) =
-    if (fontScale >= 1.3f) 48.dp else if (widthDp < 400) 40.dp else 24.dp
+internal fun curveFooterHeight(fontScale: Float, widthDp: Int, parametric: Boolean = false) =
+    if (fontScale >= 1.3f) 48.dp else if (widthDp < 400) 40.dp else if (parametric) PARAMETRIC_FOOTER_DP.dp else 24.dp
+
+/**
+ * Parametric, one-line caption: the plot's axis labels already end 4 dp under the plot, so the reserved caption line
+ * is cut to the 16 dp the caption text needs (labelSmall). Still reserved always: the card does not jump when it appears.
+ */
+internal const val PARAMETRIC_FOOTER_DP = 16f
 
 /** Everything in the card except the plot, at this font scale and window width (dp). */
-internal fun curveChromeDp(fontScale: Float, widthDp: Int): Float =
-    CurveCardTopPad.value + curveHeaderHeight(fontScale).value + curveFooterHeight(fontScale, widthDp).value
+internal fun curveChromeDp(fontScale: Float, widthDp: Int, parametric: Boolean = false): Float =
+    CurveCardTopPad.value + curveHeaderHeight(fontScale).value + curveFooterHeight(fontScale, widthDp, parametric).value
 
 /** The holder callbacks the Parametric interaction layer drives. */
 @Immutable

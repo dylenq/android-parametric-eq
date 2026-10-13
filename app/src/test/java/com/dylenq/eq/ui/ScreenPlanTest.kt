@@ -69,6 +69,10 @@ class ScreenPlanTest {
     @Test fun curveChromeFollowsWidthAndFont() {
         assertEquals(68f, curveChromeDp(1f, 411), 0.01f)
         assertEquals(84f, curveChromeDp(1f, 360), 0.01f)
+        // Parametric: one-line caption reserve is 16 dp at 400 dp and wider; unchanged where the caption wraps or the font is large.
+        assertEquals(60f, curveChromeDp(1f, 411, parametric = true), 0.01f)
+        assertEquals(84f, curveChromeDp(1f, 360, parametric = true), 0.01f)
+        assertEquals(132f, curveChromeDp(2f, 411, parametric = true), 0.01f)
         assertEquals(132f, curveChromeDp(2f, 411), 0.01f)
     }
 
