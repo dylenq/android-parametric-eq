@@ -82,3 +82,37 @@ fun planColumn(
     val total = fixedDp + 3 * gapDp + plot + content
     return ColumnPlan(plot, content, total, total > availDp + 0.5f)
 }
+
+/** UI-SPEC (Parametric): `clamp(28% of window height, 192, 280)` dp. */
+fun parametricPlotHeight(screenHeightDp: Int): Float = (screenHeightDp * 0.28f).coerceIn(192f, 280f)
+
+/** Smallest viewport the Parametric band list gets before the portrait column scrolls instead. */
+const val PARAMETRIC_LIST_MIN_DP = 160f
+
+/** Plot floor of the portrait Parametric column. */
+const val PARAMETRIC_PLOT_MIN_DP = 192f
+
+/** The plot of the IME-open compact curve card. */
+const val IME_PLOT_DP = 120f
+
+/**
+ * Splits the Parametric portrait column (curve, optional mode row, band list; the preamp card is inside the
+ * list): the plot keeps [desiredPlotDp] while the list keeps [PARAMETRIC_LIST_MIN_DP]; below that the plot
+ * shrinks to [plotMinDp] and then the column scrolls. [gaps] is the number of 12 dp gaps between visible regions.
+ */
+fun planParametricColumn(
+    availDp: Float,
+    modeRowDp: Float,
+    chromeDp: Float,
+    desiredPlotDp: Float,
+    gaps: Int,
+    gapDp: Float = COLUMN_GAP_DP,
+    listMinDp: Float = PARAMETRIC_LIST_MIN_DP,
+    plotMinDp: Float = PARAMETRIC_PLOT_MIN_DP,
+): ColumnPlan {
+    val room = availDp - modeRowDp - chromeDp - gaps * gapDp
+    val plot = desiredPlotDp.coerceAtMost(room - listMinDp).coerceAtLeast(minOf(plotMinDp, desiredPlotDp))
+    val list = maxOf(listMinDp, room - plot)
+    val total = modeRowDp + chromeDp + gaps * gapDp + plot + list
+    return ColumnPlan(plot, list, total, total > availDp + 0.5f)
+}

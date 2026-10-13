@@ -59,6 +59,7 @@ fun CurveCanvas(
     yWindow: () -> Float,
     labelWindow: Int,
     modifier: Modifier = Modifier,
+    showFrequencyLabels: Boolean = true,
 ) {
     val cs = MaterialTheme.colorScheme
     val dark = cs.surface.luminance() < 0.5f
@@ -145,7 +146,7 @@ fun CurveCanvas(
                         topLeft = Offset(plot.left - 4.dp.toPx() - layout.size.width, py(db.toFloat()) - layout.size.height / 2f),
                     )
                 }
-                for (i in freqLabels.indices) {
+                if (showFrequencyLabels) for (i in freqLabels.indices) {
                     val x = labelXs[i] ?: continue
                     drawText(freqLabels[i].second, topLeft = Offset(x, plot.bottom + 4.dp.toPx()))
                 }

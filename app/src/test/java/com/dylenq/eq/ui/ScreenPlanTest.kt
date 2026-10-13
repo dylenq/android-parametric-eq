@@ -90,4 +90,33 @@ class ScreenPlanTest {
         assertTrue(p.plotDp >= 140f)
         assertFalse(p.scrolls)
     }
+
+    @Test fun parametricPlotIsTwentyEightPercentClampedTo192And280() {
+        assertEquals(192f, parametricPlotHeight(500), 0f)
+        assertEquals(224f, parametricPlotHeight(800), 0.01f)
+        assertEquals(249.48f, parametricPlotHeight(891), 0.01f)
+        assertEquals(280f, parametricPlotHeight(2000), 0f)
+    }
+
+    @Test fun parametricColumnKeepsThePlotWhenTheListViewportFits() {
+        val p = planParametricColumn(availDp = 700f, modeRowDp = 48f, chromeDp = 84f, desiredPlotDp = 224f, gaps = 2)
+        assertEquals(224f, p.plotDp, 0f)
+        assertEquals(700f - 48f - 84f - 24f - 224f, p.contentDp, 0.01f)
+        assertFalse(p.scrolls)
+    }
+
+    @Test fun parametricPlotShrinksToItsFloorBeforeTheColumnScrolls() {
+        // room = 500 - 48 - 84 - 24 = 344; the 160 dp list minimum leaves 184 < the 192 floor.
+        val p = planParametricColumn(availDp = 500f, modeRowDp = 48f, chromeDp = 84f, desiredPlotDp = 224f, gaps = 2)
+        assertEquals(192f, p.plotDp, 0f)
+        assertEquals(160f, p.contentDp, 0f)
+        assertTrue(p.scrolls)
+    }
+
+    @Test fun imeColumnHasNoModeRowAndAPlotOf120() {
+        val p = planParametricColumn(availDp = 420f, modeRowDp = 0f, chromeDp = 4f, desiredPlotDp = IME_PLOT_DP, gaps = 1)
+        assertEquals(120f, p.plotDp, 0f)
+        assertEquals(420f - 4f - 12f - 120f, p.contentDp, 0.01f)
+        assertFalse(p.scrolls)
+    }
 }

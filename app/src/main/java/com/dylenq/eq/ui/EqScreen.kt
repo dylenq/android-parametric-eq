@@ -6,6 +6,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
@@ -55,12 +59,30 @@ private const val LEFT_PANE_FRACTION = 0.44f
 private const val LEFT_PANE_MIN_DP = 280
 private const val LEFT_PANE_PLOT_MIN_DP = 120f
 
+/** True while the software keyboard is showing. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun rememberImeVisible(): Boolean = WindowInsets.isImeVisible
+
+/** Parametric two-pane rules apply below this window height (UI-SPEC "Landscape"). */
+private const val LANDSCAPE_PEQ_MAX_HEIGHT_DP = 480
+private const val PEQ_TWO_PANE_PLOT_MIN_DP = 160f
+private const val PEQ_TWO_PANE_PLOT_MAX_DP = 280f
+private const val PEQ_LANDSCAPE_PLOT_MIN_DP = 140f
+private val PEQ_LANDSCAPE_HEADER = 32.dp
+
+/** The curve header height in the landscape Parametric form (the 32 dp override is ignored at large font). */
+private fun landscapeHeaderDp(fontScale: Float): Float = if (fontScale >= 1.3f) curveHeaderHeight(fontScale).value else PEQ_LANDSCAPE_HEADER.value
+
+
 /**
  * The screen (UI-SPEC layouts A and B). Portrait: top bar, strip and banner pinned, the curve, mode row,
  * mode content and preamp card as one column that scrolls only when the minimums do not fit. Landscape or
  * >= 840 dp: two panes (curve and mode row left, sliders and compact preamp card right), each scrolling
  * vertically only when its minimums do not fit. [spec] defaults to the real window.
- * [parametricContent] is the Phase 5 slot (the band list replaces the placeholder there).
+ * In Parametric mode the mode slot is the band list ([ParametricListRegion]) with the preamp card as its last
+ * item; the portrait column pins the curve card and mode row and the list scrolls. With the keyboard up
+ * ([imeVisible]) the curve card shrinks to a 120 dp plot and the strip, banner and mode row are not composed.
  */
 @Composable
 fun EqScreen(
@@ -73,9 +95,16 @@ fun EqScreen(
     modifier: Modifier = Modifier,
     onOpenSettings: () -> Unit = {},
     spec: WindowSpec = WindowSpec.current(),
-    parametricContent: @Composable (EqUiState) -> Unit = { ParametricPlaceholder(it.hasEnabledParametricBands) },
+    imeVisible: Boolean = rememberImeVisible(),
 ) {
     val ui by holder.ui.collectAsStateWithLifecycle()
+    val parametric = ui.mode == EqMode.PARAMETRIC
+    val imeCompact = parametric && imeVisible
+    // Landscape or wide window under 480 dp tall: the tighter Parametric two-pane form.
+    val landscapePeq = parametric && spec.twoPane && spec.heightDp < LANDSCAPE_PEQ_MAX_HEIGHT_DP
+    val focus = LocalFocusManager.current
+    val pinchSeen = remember { mutableStateOf(prefs.pinchHintSeen) }
+    val bandActions = remember(holder) { holder.bandListActions() }
     val snackbar = remember { SnackbarHostState() }
     val resetAll = rememberResetAll(holder, snackbar)
     EqErrorSnackbars(holder, snackbar)
@@ -101,12 +130,20 @@ fun EqScreen(
             onNudgeGain = holder::nudgeBandGain,
             onScaleQ = holder::scaleBandQ,
             onAddBandFromList = holder::addBandFromList,
+            onPinchCompleted = {
+                prefs.pinchHintSeen = true
+                pinchSeen.value = true
+            },
         )
     }
 
-    val strip: @Composable () -> Unit = { StatusStrip({ ui }, onStart = onStartService) }
+    // With the IME open (Parametric) the strip, banner and mode row are not composed; their state lives in
+    // the holder and the prefs, so they come back unchanged.
+    val strip: @Composable () -> Unit = {
+        if (!imeCompact) StatusStrip({ ui }, onStart = onStartService, showHint = !landscapePeq)
+    }
     val banner: @Composable () -> Unit = {
-        BannerSlot(
+        if (!imeCompact) BannerSlot(
             notice = ui.notice,
             permissionGranted = notificationsGranted,
             prefs = prefs,
@@ -116,11 +153,31 @@ fun EqScreen(
         )
     }
     val mode: @Composable () -> Unit = {
-        ModeRow(ui.mode, ui.graphicBandCount, holder::setMode, holder::setBandCount, stacked = spec.stackedModeRow)
+        if (!imeCompact) {
+            ModeRow(
+                ui.mode, ui.graphicBandCount,
+                // A focused band field would be destroyed by the cross-fade: drop focus first.
+                { m -> focus.clearFocus(); holder.setMode(m) },
+                holder::setBandCount, stacked = spec.stackedModeRow,
+            )
+        }
     }
+    val preamp: @Composable (Boolean) -> Unit = { compact ->
+        PreampCard(
+            state = { ui },
+            onPreamp = holder::setPreamp,
+            onDragStart = holder::preampDragStart,
+            onDragEnd = holder::preampDragEnd,
+            onReset = holder::resetPreamp,
+            onApplySuggested = holder::applySuggestedPreamp,
+            onLimiter = holder::setLimiter,
+            compact = compact,
+            tight = spec.tight && !compact,
+        )
+    }
+
     val modeContent: @Composable (Boolean) -> Unit = { compact ->
         val tight = spec.tight && !compact
-        // Phase 5 slot: ParametricBandList is `parametricContent`.
         Crossfade(
             targetState = ui.mode,
             animationSpec = if (reduced) snap() else tween(200),
@@ -140,24 +197,15 @@ fun EqScreen(
                     scroll = sliderScroll,
                 )
             } else {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { parametricContent(ui) }
+                ParametricListRegion(
+                    state = { ui },
+                    actions = bandActions,
+                    pinchHintSeen = pinchSeen.value,
+                    footer = { preamp(compact) },
+                )
             }
         }
     }
-    val preamp: @Composable (Boolean) -> Unit = { compact ->
-        PreampCard(
-            state = { ui },
-            onPreamp = holder::setPreamp,
-            onDragStart = holder::preampDragStart,
-            onDragEnd = holder::preampDragEnd,
-            onReset = holder::resetPreamp,
-            onApplySuggested = holder::applySuggestedPreamp,
-            onLimiter = holder::setLimiter,
-            compact = compact,
-            tight = spec.tight && !compact,
-        )
-    }
-
     Scaffold(
         // Focusable root so the shortcuts work with a hardware keyboard before any control has been focused.
         modifier = modifier
@@ -193,11 +241,15 @@ fun EqScreen(
                             chromeDp = curveChromeDp(spec.fontScale, spec.widthDp),
                             contentMinDp = graphicPanelMinDp(spec.fontScale, compact = false, tight = spec.tight),
                             plotMinDp = if (spec.tight) PLOT_MIN_TIGHT_DP else PLOT_MIN_DP,
+                            parametric = parametric,
+                            imeCompact = imeCompact,
+                            parametricPlotDp = parametricPlotHeight(spec.heightDp),
                             modifier = Modifier.verticalScroll(scroll).testTag("eq-column"),
-                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp), parametric = parametricActions) },
+                            curve = { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp), parametric = parametricActions, compact = imeCompact) },
                             mode = mode,
                             content = { modeContent(false) },
-                            preamp = { preamp(false) },
+                            // Parametric: the preamp card is the last item of the band list.
+                            preamp = { if (!parametric) preamp(false) },
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -209,12 +261,30 @@ fun EqScreen(
                     FlexColumn(
                         availableHeight = maxHeight,
                         flexIndex = 2,
-                        flexMinDp = curveChromeDp(spec.fontScale, spec.widthDp) + LEFT_PANE_PLOT_MIN_DP,
+                        flexMinDp = when {
+                            imeCompact -> CurveCardTopPad.value + IME_PLOT_DP
+                            landscapePeq -> curveChromeDp(spec.fontScale, spec.widthDp) - (curveHeaderHeight(spec.fontScale).value - landscapeHeaderDp(spec.fontScale)) + PEQ_LANDSCAPE_PLOT_MIN_DP
+                            parametric -> curveChromeDp(spec.fontScale, spec.widthDp) + PEQ_TWO_PANE_PLOT_MIN_DP
+                            else -> curveChromeDp(spec.fontScale, spec.widthDp) + LEFT_PANE_PLOT_MIN_DP
+                        },
+                        flexMaxDp = if (parametric && !landscapePeq && !imeCompact) {
+                            curveChromeDp(spec.fontScale, spec.widthDp) + PEQ_TWO_PANE_PLOT_MAX_DP
+                        } else {
+                            Float.MAX_VALUE
+                        },
                         modifier = Modifier.verticalScroll(rememberScrollState()),
                         slots = listOf(
                             strip,
                             banner,
-                            { CurveCard({ ui }, holder::applySuggestedPreamp, fillHeight = true, footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp), parametric = parametricActions) },
+                            {
+                                CurveCard(
+                                    { ui }, holder::applySuggestedPreamp, fillHeight = true,
+                                    footerHeight = curveFooterHeight(spec.fontScale, spec.widthDp), parametric = parametricActions,
+                                    compact = imeCompact,
+                                    headerHeightOverride = if (landscapePeq) PEQ_LANDSCAPE_HEADER else null,
+                                    dropEmptyFooter = landscapePeq,
+                                )
+                            },
                             mode,
                         ),
                     )
@@ -224,9 +294,9 @@ fun EqScreen(
                     FlexColumn(
                         availableHeight = maxHeight,
                         flexIndex = 0,
-                        flexMinDp = graphicPanelMinDp(spec.fontScale, compact = true),
+                        flexMinDp = if (parametric) PARAMETRIC_LIST_MIN_DP else graphicPanelMinDp(spec.fontScale, compact = true),
                         modifier = Modifier.verticalScroll(rememberScrollState()).testTag("right-pane-scroll"),
-                        slots = listOf({ modeContent(true) }, { preamp(true) }),
+                        slots = listOf({ modeContent(true) }, { if (!parametric) preamp(true) }),
                     )
                 }
             }
@@ -246,6 +316,9 @@ private fun SingleColumn(
     chromeDp: Float,
     contentMinDp: Float,
     plotMinDp: Float,
+    parametric: Boolean,
+    imeCompact: Boolean,
+    parametricPlotDp: Float,
     modifier: Modifier,
     curve: @Composable () -> Unit,
     mode: @Composable () -> Unit,
@@ -264,6 +337,31 @@ private fun SingleColumn(
         val w = constraints.maxWidth
         val loose = Constraints(minWidth = w, maxWidth = w)
         val d = density
+        if (parametric) {
+            // Curve and mode row pinned, the band list takes the rest (the preamp card is inside the list).
+            val modeP = measurables[1].measure(loose)
+            val chrome = if (imeCompact) CurveCardTopPad.value else chromeDp
+            val desired = if (imeCompact) IME_PLOT_DP else parametricPlotDp
+            val gap = (COLUMN_GAP_DP * d).roundToInt()
+            val gaps = (if (modeP.height > 0) 1 else 0) + 1
+            val pPlan = planParametricColumn(availablePx / d, modeP.height / d, chrome, desired, gaps)
+            val minListPx = (PARAMETRIC_LIST_MIN_DP * d).roundToInt()
+            val modeBlock = if (modeP.height > 0) modeP.height + gap else 0
+            var curveH = ((chrome + pPlan.plotDp) * d).roundToInt()
+            if (!pPlan.scrolls) curveH = minOf(curveH, availablePx - modeBlock - gap - minListPx)
+            val listH = if (pPlan.scrolls) minListPx else maxOf(minListPx, availablePx - curveH - modeBlock - gap)
+            val curveP = measurables[0].measure(Constraints(w, w, curveH, curveH))
+            val listP = measurables[2].measure(Constraints(w, w, listH, listH))
+            val emptyP = measurables[3].measure(loose)
+            val total = curveP.height + modeBlock + gap + listP.height
+            return@Layout layout(w, total) {
+                var y = 0
+                curveP.place(0, y); y += curveP.height + gap
+                if (modeP.height > 0) { modeP.place(0, y); y += modeP.height + gap }
+                listP.place(0, y)
+                emptyP.place(0, 0)
+            }
+        }
         val modeP = measurables[1].measure(loose)
         val preampP = measurables[3].measure(loose)
         val fixedDp = (modeP.height + preampP.height) / d + chromeDp
@@ -303,6 +401,7 @@ private fun FlexColumn(
     flexIndex: Int,
     flexMinDp: Float,
     modifier: Modifier,
+    flexMaxDp: Float = Float.MAX_VALUE,
     slots: List<@Composable () -> Unit>,
 ) {
     Layout(
@@ -316,7 +415,9 @@ private fun FlexColumn(
         val fixed = measurables.mapIndexed { i, m -> if (i == flexIndex) null else m.measure(loose) }
         val nonEmpty = measurables.indices.count { i -> i == flexIndex || fixed[i]!!.height > 0 }
         val used = fixed.filterNotNull().sumOf { it.height } + gap * (nonEmpty - 1)
-        val flexH = maxOf((flexMinDp * density).roundToInt(), avail - used)
+        val flexMinPx = (flexMinDp * density).roundToInt()
+        val flexMaxPx = if (flexMaxDp == Float.MAX_VALUE) Int.MAX_VALUE else maxOf(flexMinPx, (flexMaxDp * density).roundToInt())
+        val flexH = minOf(flexMaxPx, maxOf(flexMinPx, avail - used))
         val flexP = measurables[flexIndex].measure(Constraints(w, w, flexH, flexH))
         val placed = measurables.indices.map { i -> if (i == flexIndex) flexP else fixed[i]!! }
         val total = placed.sumOf { it.height } + gap * (nonEmpty - 1)

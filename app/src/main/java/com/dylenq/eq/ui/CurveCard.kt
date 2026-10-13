@@ -156,6 +156,12 @@ fun CurveCard(
     footerHeight: androidx.compose.ui.unit.Dp? = null,
     /** Node editing callbacks; the interaction layer is hosted only in Parametric mode when set. */
     parametric: ParametricActions? = null,
+    /** IME-open form: no header, footer, caption or frequency labels; the caller sizes the card. */
+    compact: Boolean = false,
+    /** Landscape Parametric: a shorter header (UI-SPEC 32 dp), ignored at large font. */
+    headerHeightOverride: androidx.compose.ui.unit.Dp? = null,
+    /** Landscape Parametric: no reserved footer while there is no caption. */
+    dropEmptyFooter: Boolean = false,
 ) {
     val view by remember(state) { derivedStateOf { CurveView.from(state()) } }
     val reduced = rememberReducedMotion()
@@ -178,7 +184,8 @@ fun CurveCard(
     val plotHeight = plotHeightOverride ?: defaultPlotHeight(LocalConfiguration.current.screenHeightDp).dp
     val fontScale = LocalDensity.current.fontScale
     val footer = footerHeight ?: curveFooterHeight(fontScale, LocalConfiguration.current.screenWidthDp)
-    val headerHeight = curveHeaderHeight(fontScale)
+    val headerHeight = if (fontScale < 1.3f && headerHeightOverride != null) headerHeightOverride else curveHeaderHeight(fontScale)
+    val footerShown = if (compact) 0.dp else if (dropEmptyFooter && view.caption == null) 0.dp else footer
 
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -188,7 +195,9 @@ fun CurveCard(
         Box(Modifier.then(if (fillHeight) Modifier.fillMaxSize() else Modifier)) {
         Column(Modifier.then(if (fillHeight) Modifier.fillMaxSize() else Modifier).padding(start = 8.dp, end = 8.dp, top = CurveCardTopPad)) {
             // Header: legend and headroom chip (UI-SPEC: 40 dp).
-            if (fontScale >= 1.3f) {
+            if (compact) {
+                // IME open: the plot only.
+            } else if (fontScale >= 1.3f) {
                 Column(Modifier.fillMaxWidth().height(headerHeight).padding(horizontal = 8.dp)) {
                     if (!view.bypass && !view.curveError) {
                         Box(Modifier.fillMaxWidth().height(40.dp), contentAlignment = Alignment.CenterStart) { CurveLegend(showTarget = view.targetVisible) }
@@ -212,6 +221,7 @@ fun CurveCard(
                     state = state,
                     yWindow = { anim.value },
                     labelWindow = if (isParametric) AxisScale.PARAMETRIC_LABEL_WINDOW else window,
+                    showFrequencyLabels = !compact,
                     modifier = Modifier
                         .matchParentSize()
                         .testTag("curve")
@@ -275,12 +285,12 @@ fun CurveCard(
             }
 
             // Footer: reserved at one caption line, always, so the card never jumps when the caption appears.
-            Spacer(Modifier.fillMaxWidth().height(footer))
+            Spacer(Modifier.fillMaxWidth().height(footerShown))
         }
         // The caption is drawn in the footer but its 48 dp touch target reaches up over the plot's
         // axis-label strip (the plot has no gestures in this phase).
         val caption = view.caption
-        if (caption != null) {
+        if (caption != null && !compact) {
             Row(
                 Modifier
                     .align(Alignment.BottomStart)

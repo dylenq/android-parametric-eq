@@ -11,6 +11,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,7 +27,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** Mode switch, Parametric placeholder, band-count slot and bypass (UI-SPEC checks 9 and 10). */
+/** Mode switch, Parametric band list, band-count slot and bypass (UI-SPEC checks 9 and 10). */
 @RunWith(AndroidJUnit4::class)
 class ModeBypassTest {
     @get:Rule val rule = EqComposeRule()
@@ -39,6 +40,7 @@ class ModeBypassTest {
     /** Top bar, strip, curve, mode row and the mode content region, as the screen arranges them. */
     private fun hostScreen() = rule.host {
         val ui by holder.ui.collectAsStateWithLifecycle()
+        val actions = androidx.compose.runtime.remember { holder.bandListActions() }
         Column(Modifier.padding(16.dp)) {
             EqTopBar({ ui }, holder::setBypass, onResetAll = {})
             StatusStrip({ ui }, onStart = {})
@@ -54,7 +56,7 @@ class ModeBypassTest {
                     modifier = Modifier.fillMaxWidth().height(240.dp),
                 )
             } else {
-                ParametricPlaceholder(ui.hasEnabledParametricBands)
+                ParametricListRegion({ ui }, actions, false, Modifier.height(240.dp))
             }
         }
     }
@@ -78,31 +80,28 @@ class ModeBypassTest {
         assertEquals(EqMode.GRAPHIC, ctrl.snapshot().mode)
     }
 
-    @Test fun parametricWithBandsShowsThePlaceholderAndKeepsTheCurve() {
+    @Test fun parametricWithBandsShowsTheBandListAndKeepsTheCurve() {
         clearParametricBands()
         ctrl.edit { it.addBand() }
         hostScreen()
         compose.onNodeWithTag("mode-parametric").performClick()
         compose.waitForIdle()
         assertTrue(ctrl.snapshot().bands.any { it.enabled })
-        assertEquals("Parametric editing isn't available yet", text("parametric-title"))
-        assertEquals(
-            "The curve above shows your current parametric bands. Switch back to Graphic to shape the sound.",
-            text("parametric-body"),
-        )
+        compose.onNodeWithTag("peq-list").assertIsDisplayed()
+        assertEquals(0, count("parametric-placeholder"))
+        assertEquals("1 of 16", text("band-count"))
         compose.onNodeWithTag("curve").assertIsDisplayed()
     }
 
-    @Test fun parametricWithoutBandsUsesTheEmptyCopy() {
+    /** Deliberate behaviour change of plan 05-08: the Phase 4 placeholder copy is replaced by the real empty state. */
+    @Test fun parametricWithoutBandsUsesTheEmptyState() {
         clearParametricBands()
         hostScreen()
         compose.onNodeWithTag("mode-parametric").performClick()
         compose.waitForIdle()
-        assertEquals("Parametric editing isn't available yet", text("parametric-title"))
-        assertEquals(
-            "There are no parametric bands yet, so the curve is flat. Switch back to Graphic to shape it.",
-            text("parametric-body"),
-        )
+        compose.onNodeWithTag("band-list-empty").assertIsDisplayed()
+        compose.onNodeWithText("No bands yet").assertIsDisplayed()
+        assertEquals(0, count("parametric-placeholder"))
     }
 
     @Test fun bandCountButtonHidesWithoutShiftingTheRow() {
