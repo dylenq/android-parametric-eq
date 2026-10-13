@@ -17,7 +17,7 @@ Download the APK from the project's GitHub Releases page (not published yet, see
 
 EQ shapes the sound of other apps with Android's `DynamicsProcessing` audio effect. You draw a curve, and the effect is attached to the audio sessions of the apps that announce one. It needs no root, no account and no network access.
 
-It has a graphic mode (5, 10, 15 or 31 bands, plus or minus 24 dB) and a parametric mode (up to 16 bands: peak, low shelf, high shelf, low pass and high pass, with frequency, gain and Q). Both modes share a preamp (down to -24 dB) and a limiter.
+It has a graphic mode (5, 10, 15 or 31 bands, plus or minus 12 dB per slider) and a parametric mode (up to 16 bands: peak, low shelf, high shelf, low pass and high pass, with frequency, gain up to plus or minus 24 dB, and Q). Both modes share a preamp (down to -24 dB) and a limiter.
 
 <div align="center">
 
