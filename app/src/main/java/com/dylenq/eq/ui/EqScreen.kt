@@ -35,6 +35,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -66,6 +71,7 @@ fun EqScreen(
     onAllowNotifications: () -> Unit,
     onOpenNotificationSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenSettings: () -> Unit = {},
     spec: WindowSpec = WindowSpec.current(),
     parametricContent: @Composable (EqUiState) -> Unit = { ParametricPlaceholder(it.hasEnabledParametricBands) },
 ) {
@@ -73,6 +79,9 @@ fun EqScreen(
     val snackbar = remember { SnackbarHostState() }
     val resetAll = rememberResetAll(holder, snackbar)
     EqErrorSnackbars(holder, snackbar)
+    EqMessageSnackbars(holder, snackbar)
+    val rootFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { rootFocus.requestFocus() } }
     val reduced = rememberReducedMotion()
     val sliderScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
@@ -150,12 +159,18 @@ fun EqScreen(
     }
 
     Scaffold(
-        modifier = modifier,
+        // Focusable root so the shortcuts work with a hardware keyboard before any control has been focused.
+        modifier = modifier
+            .focusRequester(rootFocus)
+            .focusable()
+            .onPreviewKeyEvent { e -> undoRedoShortcut(e, holder) },
         containerColor = MaterialTheme.colorScheme.surface,
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-            // Phase 5 slot: Undo/Redo icon buttons go in EqTopBar's phase5Slot.
-            EqTopBar({ ui }, holder::setBypass, resetAll, heightDp = spec.topBarHeightDp)
+            EqTopBar(
+                { ui }, holder::setBypass, resetAll, heightDp = spec.topBarHeightDp,
+                onUndo = holder::undo, onRedo = holder::redo, onOpenSettings = onOpenSettings,
+            )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { pad ->

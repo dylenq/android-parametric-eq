@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.dylenq.eq.R
+import com.dylenq.eq.core.EqMode
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -68,6 +69,9 @@ fun EqTopBar(
     onResetAll: () -> Unit,
     modifier: Modifier = Modifier,
     heightDp: Int = 64,
+    onUndo: () -> Unit = {},
+    onRedo: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     phase5Slot: @Composable RowScope.() -> Unit = {},
 ) {
     val s = state()
@@ -82,8 +86,57 @@ fun EqTopBar(
     ) {
         Text("EQ", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
         phase5Slot()
+        UndoRedoButtons(
+            canUndo = s.canUndo,
+            canRedo = s.canRedo,
+            gestureOpen = s.gestureOpen,
+            onUndo = onUndo,
+            onRedo = onRedo,
+        )
         EqualizerToggle(on = !s.bypass, onChange = { on -> onBypass(!on) })
-        OverflowMenu(canReset = s.graphicGainsDb.any { it != 0f } || s.preampDb != 0f, onResetAll = onResetAll)
+        OverflowMenu(
+            canReset = s.mode == EqMode.PARAMETRIC || s.graphicGainsDb.any { it != 0f } || s.preampDb != 0f,
+            onResetAll = onResetAll,
+            onOpenSettings = onOpenSettings,
+        )
+    }
+}
+
+/**
+ * Undo and Redo (UI-SPEC "Undo and Redo", PEQ-06): 48 dp icon buttons in both modes. Enabled only when the
+ * core has something to undo (redo) and no gesture is open, so a step can never land mid-drag.
+ */
+@Composable
+fun UndoRedoButtons(
+    canUndo: Boolean,
+    canRedo: Boolean,
+    gestureOpen: Boolean,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
+) {
+    HistoryButton("Undo", R.drawable.ic_undo, "undo", canUndo && !gestureOpen, onUndo)
+    HistoryButton("Redo", R.drawable.ic_redo, "redo", canRedo && !gestureOpen, onRedo)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistoryButton(label: String, icon: Int, tag: String, enabled: Boolean, onClick: () -> Unit) {
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(),
+        tooltip = { PlainTooltip { Text(label) } },
+        state = rememberTooltipState(),
+    ) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            colors = IconButtonDefaults.iconButtonColors(
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+            ),
+            modifier = Modifier.size(48.dp).testTag(tag).semantics { contentDescription = label },
+        ) {
+            Icon(painterResource(icon), contentDescription = null, modifier = Modifier.size(24.dp))
+        }
     }
 }
 
@@ -120,7 +173,7 @@ fun EqualizerToggle(on: Boolean, onChange: (Boolean) -> Unit, modifier: Modifier
 }
 
 @Composable
-private fun OverflowMenu(canReset: Boolean, onResetAll: () -> Unit) {
+private fun OverflowMenu(canReset: Boolean, onResetAll: () -> Unit, onOpenSettings: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     IconButton(
         onClick = { open = true },
@@ -137,6 +190,14 @@ private fun OverflowMenu(canReset: Boolean, onResetAll: () -> Unit) {
                 onResetAll()
             },
             modifier = Modifier.testTag("reset-all"),
+        )
+        DropdownMenuItem(
+            text = { Text("Settings") },
+            onClick = {
+                open = false
+                onOpenSettings()
+            },
+            modifier = Modifier.height(48.dp).testTag("settings-item"),
         )
     }
 }
@@ -181,6 +242,8 @@ fun rememberResetAll(holder: UiStateHolder, host: SnackbarHostState): () -> Unit
     return remember(holder, host) {
         {
             holder.resetAll()
+            // Parametric: the holder emits the "Bands and preamp reset" message, shown by EqMessageSnackbars.
+            if (holder.ui.value.mode != EqMode.GRAPHIC) return@remember Unit
             // Undo is only valid while nothing else has been edited since the reset; any later edit,
             // undo or redo dismisses the snackbar (otherwise Undo would undo that later edit).
             val serial = holder.editSerial.value
