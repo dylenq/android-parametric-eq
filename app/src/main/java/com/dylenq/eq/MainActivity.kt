@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import com.dylenq.eq.service.EqService
-import com.dylenq.eq.ui.EqScreen
+import com.dylenq.eq.ui.EqRoot
 import com.dylenq.eq.ui.EqTheme
 
 /**
@@ -41,7 +41,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             EqTheme {
-                EqScreen(
+                EqRoot(
                     holder = holder,
                     prefs = prefs,
                     notificationsGranted = notificationsGranted.value,

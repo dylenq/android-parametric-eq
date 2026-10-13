@@ -211,7 +211,8 @@ class EqRuntime(
     // Worker only: global mode was refused; turn the setting off and tell the user.
     private fun onGlobalRejected(reason: String) {
         settings.globalMode = false
-        _status.update { it.copy(notice = "Global mode turned off: this phone rejected it ($reason)") }
+        // globalMode goes false in the same update, so a seeded "on" never shows next to the notice.
+        _status.update { it.copy(globalMode = false, notice = "Global mode turned off: this phone rejected it ($reason)") }
     }
 
     // Worker only: trailing debounce, each apply pushes the deadline out.
