@@ -31,13 +31,19 @@ class DebugCommandReceiver : BroadcastReceiver() {
                     c.edit { it.setMode(m) }
                 }
                 "add-band" -> c.edit { it.addBand() }
-                "set-band" -> {
-                    val i = intent.getIntExtra("index", 0)
-                    val band = com.dylenq.eq.core.Band(
-                        com.dylenq.eq.core.FilterKind.PEAK,
-                        intent.getFloatExtra("hz", 1000f), intent.getFloatExtra("db", 0f), intent.getFloatExtra("q", 1f), true,
-                    )
-                    c.edit { it.setBand(i.toUInt(), band) }
+                "set-band" -> setBand(c, intent)
+                "remove-band" -> {
+                    val i = intent.getIntExtra("index", -1)
+                    if (i < 0 || i >= c.snapshot().bands.size) {
+                        Log.i(TAG, "remove-band: index $i out of range")
+                    } else {
+                        c.edit { it.removeBand(i.toUInt()) }
+                    }
+                }
+                "select-band" -> {
+                    // Selection lives in the UI holder, not the core. Call after the activity is up.
+                    val i = intent.getIntExtra("index", -1)
+                    (context.applicationContext as EqApp).uiHolder().selectBand(if (i < 0) null else i)
                 }
                 "set-band-count" -> c.edit { it.setGraphicBandCount(intent.getIntExtra("count", 10).toUInt()) }
                 "set-limiter" -> c.edit { it.setLimiterEnabled(on(intent)) }
@@ -49,6 +55,33 @@ class DebugCommandReceiver : BroadcastReceiver() {
         } catch (t: Throwable) {
             Log.w(TAG, "debug command failed: ${t.javaClass.name}: ${t.message}")
         }
+    }
+
+    /** set-band: index, kind (peak|low-shelf|high-shelf|low-pass|high-pass), freq, gain, q, enabled. Missing extras keep the band's value. */
+    private fun setBand(c: com.dylenq.eq.EqController, intent: Intent) {
+        val i = intent.getIntExtra("index", -1)
+        val cur = c.snapshot().bands.getOrNull(i)
+        if (cur == null) {
+            Log.i(TAG, "set-band: index $i out of range")
+            return
+        }
+        val kind = when (val k = intent.getStringExtra("kind")) {
+            null -> cur.kind
+            "peak" -> com.dylenq.eq.core.FilterKind.PEAK
+            "low-shelf" -> com.dylenq.eq.core.FilterKind.LOW_SHELF
+            "high-shelf" -> com.dylenq.eq.core.FilterKind.HIGH_SHELF
+            "low-pass" -> com.dylenq.eq.core.FilterKind.LOW_PASS
+            "high-pass" -> com.dylenq.eq.core.FilterKind.HIGH_PASS
+            else -> { Log.i(TAG, "set-band: unknown kind $k"); return }
+        }
+        val band = com.dylenq.eq.core.Band(
+            kind,
+            if (intent.hasExtra("freq")) intent.getFloatExtra("freq", cur.freq) else cur.freq,
+            if (intent.hasExtra("gain")) intent.getFloatExtra("gain", cur.gainDb) else cur.gainDb,
+            if (intent.hasExtra("q")) intent.getFloatExtra("q", cur.q) else cur.q,
+            if (intent.hasExtra("enabled")) intent.getBooleanExtra("enabled", cur.enabled) else cur.enabled,
+        )
+        c.edit { it.setBand(i.toUInt(), band) }
     }
 
     private fun on(i: Intent) = i.getStringExtra("value") == "on"
@@ -64,7 +97,8 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "EQ-STATE",
             "hash=$hash bypass=${s.bypass} mode=${s.mode} preamp=${s.preampDb} g3=${s.graphicGainsDb.getOrNull(3)} " +
                 "globalMode=${rt.settings.globalMode} startOnBoot=${rt.settings.startOnBoot} " +
-                "sessions=${st.sessionCount} nonce=$nonce",
+                "sessions=${st.sessionCount} nonce=$nonce canUndo=${s.canUndo} bands=${s.bands.size} " +
+                "first=${s.bands.take(4).joinToString(";") { "${it.freq}/${it.gainDb}/${it.q}/${it.kind}/${it.enabled}" }}",
         )
     }
 
