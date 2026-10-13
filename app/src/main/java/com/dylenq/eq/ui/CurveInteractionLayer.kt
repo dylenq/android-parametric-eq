@@ -483,7 +483,21 @@ fun CurveInteractionLayer(
         }
 
         if (labelsOn) {
+            // Labels that would sit on another node's glyph or another label are hidden (the selected one always shows).
+            val infos = list.indices.map { i ->
+                val b = list[i]
+                val c = centres[i]
+                val layout = labels.layout(i + 1, selected = i == sel, enabled = b.enabled)
+                val halfNode = (if (b.kind.hasGain()) NodeGlyphs.CIRCLE_DP else NodeGlyphs.DIAMOND_DP) / 2f * this.density
+                val below = NodeGlyphs.labelBelow(c.y / this.density, plot.top / this.density)
+                LabelItem(
+                    c.x, c.y, halfNode + NodeGlyphs.OUTER_RING_DP * this.density + (if (i == sel) (NodeGlyphs.SELECTED_RING_GAP_DP + NodeGlyphs.SELECTED_RING_DP) * this.density else 0f),
+                    layout.first.size.width.toFloat(), layout.first.size.height.toFloat(), below, NodeGlyphs.LABEL_GAP_DP * this.density, anchorHalf = halfNode,
+                )
+            }
+            val shown = NodeLabelCollision.visible(infos, sel)
             for (i in order) {
+                if (!shown[i]) continue
                 val b = list[i]
                 val c = centres[i]
                 val layout = labels.layout(i + 1, selected = i == sel, enabled = b.enabled)
