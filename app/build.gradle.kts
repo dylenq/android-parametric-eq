@@ -1,4 +1,5 @@
 import java.io.File
+import java.util.Properties
 import javax.inject.Inject
 import org.gradle.process.ExecOperations
 
@@ -13,6 +14,22 @@ val material3Version = "1.4.0"
 val activityComposeVersion = "1.13.0"
 val lifecycleComposeVersion = "2.10.0"
 
+// Release signing inputs: keystore.properties (git-ignored) or EQ_KEYSTORE_* env vars. Blank counts as absent.
+val keystoreProps = Properties().also { props ->
+    val f = rootProject.file("keystore.properties")
+    if (f.isFile) f.inputStream().use { props.load(it) }
+}
+
+fun signingValue(prop: String, env: String): String? =
+    (keystoreProps.getProperty(prop) ?: System.getenv(env))?.trim()?.takeIf { it.isNotEmpty() }
+
+// Explicit opt-in for a throwaway TEST apk (scripts/release-apk.sh --test). Never a silent fallback.
+val testSigning = findProperty("eq.testSigning") == "true"
+val releaseStoreFile: File? = signingValue("storeFile", "EQ_KEYSTORE_FILE")?.let { path ->
+    File(path).let { if (it.isAbsolute) it else rootProject.file(path) }
+}
+val hasReleaseSigning = testSigning || (releaseStoreFile != null && releaseStoreFile.isFile)
+
 android {
     namespace = "com.dylenq.eq"
     compileSdk = 37
@@ -23,11 +40,44 @@ android {
         minSdk = 28
         targetSdk = 37
         versionCode = 1
-        versionName = "0.0.1-spike"
+        versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64", "armeabi-v7a")
         }
+    }
+
+    signingConfigs {
+        if (testSigning) {
+            // Throwaway key, never published, used only for build/test-signing/EQ-TEST-ONLY.jks (not a secret).
+            create("release") {
+                storeFile = rootProject.file("build/test-signing/EQ-TEST-ONLY.jks")
+                storePassword = "eq-test-only-not-a-secret"
+                keyAlias = "eqtest"
+                keyPassword = "eq-test-only-not-a-secret"
+            }
+        } else if (releaseStoreFile != null && releaseStoreFile.isFile) {
+            create("release") {
+                storeFile = releaseStoreFile
+                val storePw = signingValue("storePassword", "EQ_KEYSTORE_PASSWORD")
+                storePassword = storePw
+                keyAlias = signingValue("keyAlias", "EQ_KEY_ALIAS")
+                keyPassword = signingValue("keyPassword", "EQ_KEY_PASSWORD") ?: storePw
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("release")
+        }
+    }
+
+    // lintVitalAnalyzeRelease needs lint-gradle 32.1.1, which is not in the offline Gradle cache.
+    // Local (offline) and CI runs must take the same path, so release lint is off.
+    lint {
+        checkReleaseBuilds = false
     }
 
     compileOptions {
@@ -151,4 +201,14 @@ dependencies {
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test:rules:1.7.0")
     androidTestImplementation("androidx.test:core:1.7.0")
+}
+
+gradle.taskGraph.whenReady {
+    if (!hasReleaseSigning && allTasks.any { it.path == ":app:packageRelease" }) {
+        throw GradleException(
+            "Release signing is not configured. Options: (1) create keystore.properties with scripts/create-keystore.sh, " +
+                "(2) set EQ_KEYSTORE_FILE / EQ_KEYSTORE_PASSWORD / EQ_KEY_ALIAS in the environment, " +
+                "(3) pass -Peq.testSigning=true for a throwaway TEST apk (never publish it)."
+        )
+    }
 }

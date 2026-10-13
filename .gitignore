@@ -12,3 +12,4 @@ __pycache__/
 .planning/state.json
 core/tools/golden-gen/target/
 .kotlin/
+keystore.properties
