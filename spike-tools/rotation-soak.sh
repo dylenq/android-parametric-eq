@@ -16,7 +16,7 @@ source "$ROOT/spike-tools/env.sh"
 source "$ROOT/spike-tools/phase3-lib.sh"
 cd "$ROOT"
 N="${1:-60}"
-CYCLES_PER_CONFIG=10
+CYCLES_PER_CONFIG="${SOAK_CYCLES_PER_CONFIG:-10}"
 # One busy loop reads only ~35% on this single-core emulator (see the positive control below), so the
 # default is 25, not 50; override with SPIN_PCT. Idle app samples are 0-1%.
 THRESHOLD="${SPIN_PCT:-25}"
@@ -25,6 +25,8 @@ mkdir -p "$OUT"
 
 # bands:mode
 CONFIGS=(10:graphic 15:graphic 31:graphic 10:parametric 15:parametric 31:parametric)
+# SOAK_CONFIGS="10:parametric" restricts the run (e.g. Parametric only, with several bands).
+[ -z "${SOAK_CONFIGS:-}" ] || read -ra CONFIGS <<< "$SOAK_CONFIGS"
 
 bash "$ROOT/spike-tools/emulator-up.sh"
 build_install
@@ -49,6 +51,13 @@ prepare() {
   cmd --es cmd set-band-count --ei count "$1"
   g 1 6; g 2 -6; g 4 3; g 6 -2
   cmd --es cmd set-preamp --ef db -3
+  if [ "$2" = parametric ]; then
+    # Several parametric bands (the core starts with at most a few): add up to 8 and shape them.
+    for i in 0 1 2 3 4 5 6 7; do
+      cmd --es cmd add-band
+      cmd --es cmd set-band --ei index "$i" --ef hz "$((100 * (i + 1) * (i + 1)))" --ef db "$(( (i % 2) * 6 - 3 ))" --ef q 1.2
+    done
+  fi
   cmd --es cmd set-bypass --es value off
   cmd --es cmd set-mode --es value "$2"
   sleep 1

@@ -30,6 +30,15 @@ class DebugCommandReceiver : BroadcastReceiver() {
                     val m = if (intent.getStringExtra("value") == "parametric") EqMode.PARAMETRIC else EqMode.GRAPHIC
                     c.edit { it.setMode(m) }
                 }
+                "add-band" -> c.edit { it.addBand() }
+                "set-band" -> {
+                    val i = intent.getIntExtra("index", 0)
+                    val band = com.dylenq.eq.core.Band(
+                        com.dylenq.eq.core.FilterKind.PEAK,
+                        intent.getFloatExtra("hz", 1000f), intent.getFloatExtra("db", 0f), intent.getFloatExtra("q", 1f), true,
+                    )
+                    c.edit { it.setBand(i.toUInt(), band) }
+                }
                 "set-band-count" -> c.edit { it.setGraphicBandCount(intent.getIntExtra("count", 10).toUInt()) }
                 "set-limiter" -> c.edit { it.setLimiterEnabled(on(intent)) }
                 "set-bypass" -> c.setBypass(on(intent))
