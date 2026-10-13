@@ -11,3 +11,4 @@ app/src/main/jniLibs/
 __pycache__/
 .planning/state.json
 core/tools/golden-gen/target/
+.kotlin/
