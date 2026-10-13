@@ -107,7 +107,7 @@ class LayoutTest {
         }
         assertTrue("plot >= 140 dp: $plot", plot >= 140f)
         assertTrue("slider tracks >= 120 dp: ${b("band-0").height}", b("band-0").height >= 120.dp)
-        // The Material segmented buttons are 40 dp tall as shipped (not changed here); their row is 48 dp.
+        // The segmented buttons and the band-count button are 48 dp tall since plan 05-08 (ModeRowTouchTargetTest).
         for (tag in listOf("equalizer-toggle", "mode-row", "band-count-slot", "preamp-pill", "limiter-row")) {
             assertTrue("$tag touch target >= 48 dp: ${b(tag).height} x ${b(tag).width}", b(tag).height >= 47.5.dp)
         }

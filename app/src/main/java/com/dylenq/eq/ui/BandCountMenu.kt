@@ -1,5 +1,7 @@
 package com.dylenq.eq.ui
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -24,14 +26,17 @@ val BAND_COUNTS: List<Int> = listOf(5, 10, 15, 31)
 
 private fun label(n: Int) = "$n bands"
 
-/** UI-SPEC "Band-count picker": 112 dp x 40 dp outlined button (48 dp target) with a four-item menu. */
+/** UI-SPEC "Band-count picker": 112 dp x 48 dp outlined button with a four-item menu. */
 @Composable
 fun BandCountMenu(count: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
     var open by remember { mutableStateOf(false) }
     OutlinedButton(
         onClick = { open = true },
+        // Tighter side padding: the button's natural width otherwise squeezes the "Parametric" segment at 360 dp.
+        contentPadding = PaddingValues(start = 12.dp, end = 8.dp),
         modifier = modifier
             .widthIn(min = 112.dp)
+            .height(MODE_ROW_HEIGHT)
             .testTag("band-count-button")
             .semantics { contentDescription = "Number of bands, $count" },
     ) {

@@ -4,7 +4,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
@@ -27,6 +29,9 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import com.dylenq.eq.core.EqMode
 
+/** The segmented buttons and the band-count button are this tall, so there is no dead strip in the row (L-10a). */
+internal val MODE_ROW_HEIGHT = 48.dp
+
 @Composable
 fun rememberModeRowStacked(): Boolean =
     modeRowStacked(LocalConfiguration.current.screenWidthDp, LocalDensity.current.fontScale)
@@ -47,18 +52,18 @@ fun ModeRow(
     stacked: Boolean = rememberModeRowStacked(),
 ) {
     val segmented: @Composable (Modifier) -> Unit = { m ->
-        SingleChoiceSegmentedButtonRow(m.testTag("mode-segmented")) {
+        SingleChoiceSegmentedButtonRow(m.height(MODE_ROW_HEIGHT).testTag("mode-segmented")) {
             SegmentedButton(
                 selected = mode == EqMode.GRAPHIC,
                 onClick = { if (mode != EqMode.GRAPHIC) onMode(EqMode.GRAPHIC) },
                 shape = SegmentedButtonDefaults.itemShape(0, 2),
-                modifier = Modifier.testTag("mode-graphic"),
+                modifier = Modifier.fillMaxHeight().testTag("mode-graphic"),
             ) { Text("Graphic") }
             SegmentedButton(
                 selected = mode == EqMode.PARAMETRIC,
                 onClick = { if (mode != EqMode.PARAMETRIC) onMode(EqMode.PARAMETRIC) },
                 shape = SegmentedButtonDefaults.itemShape(1, 2),
-                modifier = Modifier.testTag("mode-parametric"),
+                modifier = Modifier.fillMaxHeight().testTag("mode-parametric"),
             ) { Text("Parametric") }
         }
     }

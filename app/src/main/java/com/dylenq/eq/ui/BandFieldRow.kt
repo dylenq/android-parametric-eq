@@ -120,7 +120,7 @@ internal fun BandFieldRow(index: Int, band: Band, actions: BandListActions, modi
     val n = index + 1
     val freq: @Composable (Modifier) -> Unit = { m ->
         NumberField(
-            which = BandField.FREQUENCY, label = "Frequency Hz", description = "Band $n frequency, hertz",
+            which = BandField.FREQUENCY, label = "Freq Hz", description = "Band $n frequency, hertz",
             tag = "band-field-freq-$index", imeAction = ImeAction.Next, enabled = true,
             modelText = NumericField.formatFrequency(band.freq), session = session,
             parse = NumericField::parseFrequency, format = NumericField::formatFrequency,
@@ -271,7 +271,7 @@ private fun NumberField(
         enabled = enabled,
         singleLine = true,
         isError = isError,
-        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+        label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
         textStyle = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = imeAction),
         keyboardActions = KeyboardActions(

@@ -19,6 +19,7 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
@@ -67,13 +68,13 @@ class ParametricLayoutTest {
     }
 
     /** The whole [EqScreen] in a box of exactly the window size ([spec]); [fakeIme] is the injected keyboard flag. */
-    private fun hostScreen(spec: WindowSpec) = rule.host {
+    private fun hostScreen(spec: WindowSpec, notificationsGranted: Boolean = true) = rule.host {
         val base = LocalDensity.current
         CompositionLocalProvider(LocalDensity provides Density(base.density, spec.fontScale)) {
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.wrapContentSize(Alignment.TopStart, unbounded = true).size(spec.widthDp.dp, spec.heightDp.dp)) {
                     EqScreen(
-                        holder = app.uiHolder(), prefs = rule.uiPrefs, notificationsGranted = true,
+                        holder = app.uiHolder(), prefs = rule.uiPrefs, notificationsGranted = notificationsGranted,
                         onStartService = {}, onAllowNotifications = {}, onOpenNotificationSettings = {},
                         spec = spec, imeVisible = ime,
                     )
@@ -231,5 +232,121 @@ class ParametricLayoutTest {
         val plot = b("curve").height
         Log.i("EQ-LAYOUT", "two-pane 1000x700: plot=$plot")
         assertTrue("plot within 160..280: $plot", plot >= 160.dp && plot <= 280.dp)
+    }
+
+    // ---- Portrait: measured, not assumed (L-12) ----
+
+    private fun r(v: androidx.compose.ui.unit.Dp) = Math.round(v.value * 10) / 10f
+
+    /** Reads every block of the portrait Parametric screen and logs one line; returns the numbers. */
+    private fun measurePortrait(label: String, spec: WindowSpec, banner: Boolean): Map<String, Float> {
+        val cur = b("curve")
+        val mode = b("mode-row")
+        val list = b("peq-list")
+        val strip = b("status-strip")
+        val column = b("eq-column")
+        val bannerBottom = if (banner) b("banner-rationale").bottom else strip.bottom
+        val m = linkedMapOf(
+            "window_h" to spec.heightDp.toFloat(),
+            "strip_top" to r(strip.top), "strip_bottom" to r(strip.bottom),
+            "banner_bottom" to r(bannerBottom),
+            "column_top" to r(column.top), "column_bottom" to r(column.bottom),
+            "plot_h" to r(cur.height), "curve_top" to r(cur.top), "curve_bottom" to r(cur.bottom),
+            "mode_top" to r(mode.top), "mode_bottom" to r(mode.bottom), "mode_h" to r(mode.height),
+            "list_top" to r(list.top), "list_bottom" to r(list.bottom), "list_h" to r(list.height),
+            "outer_scroll_max_px" to verticalMax("eq-column"),
+        )
+        Log.i("EQ-LAYOUT", "PORTRAIT $label: " + m.entries.joinToString(" ") { "${it.key}=${it.value}" })
+        return m
+    }
+
+    private fun invariants(label: String, spec: WindowSpec, m: Map<String, Float>) {
+        val h = spec.heightDp.toFloat()
+        assertTrue("$label curve above the mode row", m["curve_bottom"]!! <= m["mode_top"]!! + 0.5f)
+        assertTrue("$label mode row above the list", m["mode_bottom"]!! <= m["list_top"]!! + 0.5f)
+        assertTrue("$label curve and mode row inside the window: ${m["mode_bottom"]} <= $h", m["mode_bottom"]!! <= h)
+        assertTrue("$label curve starts below the top bar", m["curve_top"]!! >= 56f)
+    }
+
+    @Test fun portrait360x800() {
+        val spec = WindowSpec(360, 800)
+        hostScreen(spec)
+        compose.waitForIdle()
+        val m = measurePortrait("360x800", spec, banner = false)
+        invariants("360x800", spec, m)
+        assertEquals("no outer scrolling without a banner", 0f, m["outer_scroll_max_px"]!!, 0f)
+        assertTrue("list viewport >= 160 dp: ${m["list_h"]}", m["list_h"]!! >= 160f)
+        assertTrue("list bottom inside the window", m["list_bottom"]!! <= 800f)
+        assertTrue("plot >= 192 dp: ${m["plot_h"]}", m["plot_h"]!! >= 192f)
+        assertEquals("mode row is 48 dp", 48f, m["mode_h"]!!, 0.6f)
+    }
+
+    @Test fun portrait411x891() {
+        val spec = WindowSpec(411, 891)
+        hostScreen(spec)
+        compose.waitForIdle()
+        val m = measurePortrait("411x891", spec, banner = false)
+        invariants("411x891", spec, m)
+        assertEquals(0f, m["outer_scroll_max_px"]!!, 0f)
+        assertTrue("list viewport >= 160 dp: ${m["list_h"]}", m["list_h"]!! >= 160f)
+        assertTrue("plot >= 192 dp: ${m["plot_h"]}", m["plot_h"]!! >= 192f)
+    }
+
+    @Test fun portrait411x891WithTheNotificationBanner() {
+        val spec = WindowSpec(411, 891)
+        hostScreen(spec, notificationsGranted = false)
+        compose.waitForIdle()
+        val m = measurePortrait("411x891+banner", spec, banner = exists("banner-rationale"))
+        invariants("411x891+banner", spec, m)
+        // The banner fallback: the list may drop under 160 dp only by scrolling the page.
+        assertTrue("list viewport >= 160 dp or the page scrolls: ${m["list_h"]} / ${m["outer_scroll_max_px"]}", m["list_h"]!! >= 160f || m["outer_scroll_max_px"]!! > 0f)
+    }
+
+    @Test fun portrait360x800WithTheNotificationBanner() {
+        val spec = WindowSpec(360, 800)
+        hostScreen(spec, notificationsGranted = false)
+        compose.waitForIdle()
+        val m = measurePortrait("360x800+banner", spec, banner = exists("banner-rationale"))
+        invariants("360x800+banner", spec, m)
+        assertTrue("list viewport >= 160 dp or the page scrolls: ${m["list_h"]} / ${m["outer_scroll_max_px"]}", m["list_h"]!! >= 160f || m["outer_scroll_max_px"]!! > 0f)
+    }
+
+    @Test fun scrollingTheListLeavesTheCurveAndModeRowWhereTheyAreAndEndsInThePreampCard() {
+        ctrl.edit { while (it.snapshot().bands.size < 12) it.addBand() }
+        hostScreen(WindowSpec(411, 891))
+        compose.waitForIdle()
+        val curve = b("curve")
+        val mode = b("mode-row")
+        assertFalse("preamp card is not pinned below the list", exists("limiter-row") && b("limiter-row").top > b("peq-list").bottom)
+        compose.onNodeWithTag("band-list").performScrollToIndex(2 + 12) // the footer item
+        compose.waitForIdle()
+        assertEquals("curve unmoved", curve, b("curve"))
+        assertEquals("mode row unmoved", mode, b("mode-row"))
+        assertTrue("the preamp card is the last list item", exists("limiter-row"))
+        val list = b("peq-list")
+        assertTrue("limiter row inside the list viewport: ${b("limiter-row")} in $list", b("limiter-row").bottom <= list.bottom + 1.dp && b("limiter-row").top >= list.top)
+        assertTrue("nothing follows the preamp card", b("limiter-row").bottom >= list.bottom - 40.dp)
+    }
+
+    @Test fun aSelectedBandBelowTheFoldIsScrolledIntoTheViewport() {
+        ctrl.edit { while (it.snapshot().bands.size < 12) it.addBand() }
+        hostScreen(WindowSpec(411, 891))
+        compose.waitForIdle()
+        app.uiHolder().selectBand(10)
+        val until = System.currentTimeMillis() + 3000
+        while (!exists("band-field-freq-10") && System.currentTimeMillis() < until) { Thread.sleep(50); compose.waitForIdle() }
+        Thread.sleep(600)
+        compose.waitForIdle()
+        val f = b("band-field-freq-10")
+        val list = b("peq-list")
+        assertTrue("expanded row's field inside the list viewport: $f in $list", f.top >= list.top - 1.dp && f.bottom <= list.bottom + 1.dp)
+    }
+
+    @Test fun theBandListHintFollowsThePinchPreference() {
+        rule.uiPrefs.pinchHintSeen = false
+        hostScreen(WindowSpec(411, 891))
+        compose.waitForIdle()
+        val hint = compose.onNodeWithTag("band-list-hint").fetchSemanticsNode().config[SemanticsProperties.Text].joinToString("") { it.text }
+        assertEquals(BAND_LIST_HINT_WITH_PINCH, hint)
     }
 }
