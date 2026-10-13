@@ -117,7 +117,7 @@ class PersistenceTest {
         compose.waitForIdle()
         scenario.recreate()
         compose.waitForIdle()
-        compose.onNodeWithTag("parametric-placeholder").assertIsDisplayed()
+        compose.onNodeWithTag("peq-list").assertIsDisplayed()
         assertEquals(0, count("slider-row"))
         assertEquals(EqMode.PARAMETRIC, ctrl.snapshot().mode)
     }
