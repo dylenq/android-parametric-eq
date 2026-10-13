@@ -54,7 +54,8 @@ shape10() { g 1 6; g 2 -6; g 4 3; g 6 -2; g 8 4; g 9 -3; cmd --es cmd set-preamp
 reset_parametric() {
   "$ADB" shell am force-stop "$PKG"
   for _ in $(seq 1 16); do cmd --es cmd remove-band --ei index 0; done
-  cmd --es cmd set-preamp --ef db 0
+  # preamp -8 dB leaves positive headroom, so no red "Over by" chip shows in the README shots
+  cmd --es cmd set-preamp --ef db -8
   cmd --es cmd set-limiter --es value on
   cmd --es cmd set-bypass --es value off
   cmd --es cmd set-global --es value off
@@ -115,6 +116,9 @@ tap_node() {  # tap_node <regex>
 "$ADB" shell settings put system accelerometer_rotation 0
 "$ADB" shell settings put system user_rotation 0
 
+# SHOTS=parametric retakes only the two Parametric shots (default: all five)
+SHOTS="${SHOTS:-all}"
+if [ "$SHOTS" = "all" ]; then
 # Graphic: 10 bands, non-flat curve, preamp -6, limiter on
 "$ADB" shell cmd uimode night no
 reset_state 10 graphic; shape10; launch
@@ -122,6 +126,8 @@ snap screenshot-graphic-light
 "$ADB" shell cmd uimode night yes
 reset_state 10 graphic; shape10; launch
 snap screenshot-graphic-dark
+
+fi
 
 # Parametric: six bands of mixed kinds, band 2 selected so the overlay shows
 "$ADB" shell cmd uimode night no
@@ -133,6 +139,7 @@ reset_parametric; launch
 cmd --es cmd select-band --ei index 1; sleep 2
 snap screenshot-parametric-dark
 
+if [ "$SHOTS" = "all" ]; then
 # Settings, light, must show Version 0.1.0
 "$ADB" shell cmd uimode night no
 reset_state 10 graphic; shape10; launch
@@ -143,5 +150,6 @@ if [ -z "$(find_node 'Version 0\.1\.0')" ]; then
 fi
 [ -n "$(find_node 'Version 0\.1\.0')" ] || { say "Settings does not show Version 0.1.0"; exit 1; }
 snap screenshot-settings
+fi
 
 say "done"
