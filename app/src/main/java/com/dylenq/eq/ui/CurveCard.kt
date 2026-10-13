@@ -90,6 +90,10 @@ class ParametricActions(
     val onSetKind: (index: Int, kind: com.dylenq.eq.core.FilterKind) -> Unit = { _, _ -> },
     val onSetEnabled: (index: Int, on: Boolean) -> Unit = { _, _ -> },
     val onDeleteBand: (index: Int) -> Unit = {},
+    val onNudgeFrequency: (index: Int, steps: Int) -> Unit = { _, _ -> },
+    val onNudgeGain: (index: Int, deltaDb: Float) -> Unit = { _, _ -> },
+    val onScaleQ: (index: Int, factor: Float) -> Unit = { _, _ -> },
+    val onAddBandFromList: () -> Unit = {},
 )
 
 /** What the card's chrome (legend, chip, caption, semantics) needs; equal values do not recompose. */
@@ -234,6 +238,10 @@ fun CurveCard(
                         onSetKind = parametric.onSetKind,
                         onSetEnabled = parametric.onSetEnabled,
                         onDeleteBand = parametric.onDeleteBand,
+                        onNudgeFrequency = parametric.onNudgeFrequency,
+                        onNudgeGain = parametric.onNudgeGain,
+                        onScaleQ = parametric.onScaleQ,
+                        onAddBandFromList = parametric.onAddBandFromList,
                         modifier = Modifier.matchParentSize(),
                     )
                     NodeReadoutChip(

@@ -15,6 +15,18 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
 import androidx.compose.ui.geometry.Rect
@@ -340,6 +352,10 @@ fun CurveInteractionLayer(
     onSetKind: (index: Int, kind: FilterKind) -> Unit = { _, _ -> },
     onSetEnabled: (index: Int, on: Boolean) -> Unit = { _, _ -> },
     onDeleteBand: (index: Int) -> Unit = {},
+    onNudgeFrequency: (index: Int, steps: Int) -> Unit = { _, _ -> },
+    onNudgeGain: (index: Int, deltaDb: Float) -> Unit = { _, _ -> },
+    onScaleQ: (index: Int, factor: Float) -> Unit = { _, _ -> },
+    onAddBandFromList: () -> Unit = {},
 ) {
     val bandsState = rememberUpdatedState(bands)
     val selectedState = rememberUpdatedState(selected)
@@ -357,11 +373,21 @@ fun CurveInteractionLayer(
     val onSetKindState = rememberUpdatedState(onSetKind)
     val onSetEnabledState = rememberUpdatedState(onSetEnabled)
     val onDeleteBandState = rememberUpdatedState(onDeleteBand)
+    val onNudgeFrequencyState = rememberUpdatedState(onNudgeFrequency)
+    val onNudgeGainState = rememberUpdatedState(onNudgeGain)
+    val onScaleQState = rememberUpdatedState(onScaleQ)
+    val onAddBandFromListState = rememberUpdatedState(onAddBandFromList)
     // The long-press menu's band, or null. Transient: it does not survive rotation.
     val menu = remember { mutableStateOf<Int?>(null) }
     // The band as it was when the menu opened: if the band at that index changes underneath (delete,
     // undo, a TalkBack action) the menu closes instead of acting on a different band (T-05-10).
     val menuOpenedWith = remember { mutableStateOf<Band?>(null) }
+    // Opens the menu for [index] and selects it (the gesture machine and the TalkBack actions share this).
+    val openMenu: (Int) -> Unit = { index ->
+        menuOpenedWith.value = bandsState.value().getOrNull(index)
+        menu.value = index
+        onSelectState.value(index)
+    }
     val machine = remember {
         MachineInputs(
             bands = { bandsState.value() },
@@ -412,7 +438,19 @@ fun CurveInteractionLayer(
     }
 
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
-    Box(modifier.onSizeChanged { boxSize = it }) {
+    Box(
+        modifier
+            .onSizeChanged { boxSize = it }
+            .testTag("peq-plot")
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Add band") {
+                        onAddBandFromListState.value()
+                        true
+                    },
+                )
+            },
+    ) {
     Canvas(
         Modifier
             .fillMaxSize()
@@ -464,6 +502,77 @@ fun CurveInteractionLayer(
                 drawText(layout.first, topLeft = Offset(x, y))
             }
         }
+    }
+
+    // One touch-transparent semantics child per band (semantics only, no pointer handling): the non-gesture
+    // route to every gesture. Everything band-dependent is read inside the semantics/offset lambdas so a
+    // drag updates them without recomposing the layer; composition only sees the band count.
+    val bandCount by remember { derivedStateOf { bandsState.value().size } }
+    val nodeSize = 48.dp
+    for (i in 0 until bandCount) {
+        Box(
+            Modifier
+                .offset {
+                    val b = bandsState.value().getOrNull(i)
+                    if (b == null || boxSize == IntSize.Zero) {
+                        IntOffset.Zero
+                    } else {
+                        val plot = PlotGeometry.plotRect(boxSize.width.toFloat(), boxSize.height.toFloat(), density)
+                        val c = ParametricMath.nodePosition(b.freq, b.gainDb, b.kind.hasGain(), plot, windowState.value())
+                        val half = (nodeSize / 2).roundToPx()
+                        IntOffset(c.x.roundToInt() - half, c.y.roundToInt() - half)
+                    }
+                }
+                .size(nodeSize)
+                .testTag("peq-node-$i")
+                .semantics {
+                    val b = bandsState.value().getOrNull(i) ?: return@semantics
+                    val isSelected = selectedState.value() == i
+                    contentDescription = NodeSpeech.contentDescription(i, b)
+                    stateDescription = NodeSpeech.stateDescription(b, isSelected)
+                    this.selected = isSelected
+                    role = Role.Button
+                    onClick(label = "Select band") {
+                        onSelectState.value(i)
+                        true
+                    }
+                    onLongClick(label = "Open menu") {
+                        openMenu(i)
+                        true
+                    }
+                    customActions = buildList {
+                        if (b.kind.hasGain()) {
+                            add(CustomAccessibilityAction("Increase gain") {
+                                onNudgeGainState.value(i, 0.5f); true
+                            })
+                            add(CustomAccessibilityAction("Decrease gain") {
+                                onNudgeGainState.value(i, -0.5f); true
+                            })
+                        }
+                        add(CustomAccessibilityAction("Move up in frequency") {
+                            onNudgeFrequencyState.value(i, 1); true
+                        })
+                        add(CustomAccessibilityAction("Move down in frequency") {
+                            onNudgeFrequencyState.value(i, -1); true
+                        })
+                        add(CustomAccessibilityAction("Increase Q") {
+                            onScaleQState.value(i, 1.12f); true
+                        })
+                        add(CustomAccessibilityAction("Decrease Q") {
+                            onScaleQState.value(i, 1f / 1.12f); true
+                        })
+                        add(CustomAccessibilityAction("Change type") {
+                            openMenu(i); true
+                        })
+                        add(CustomAccessibilityAction(if (b.enabled) "Disable" else "Enable") {
+                            onSetEnabledState.value(i, !b.enabled); true
+                        })
+                        add(CustomAccessibilityAction("Delete band") {
+                            onDeleteBandState.value(i); true
+                        })
+                    }
+                },
+        )
     }
 
     // The long-press menu, anchored at the node. A band that disappears (delete, undo) closes it.

@@ -68,6 +68,10 @@ abstract class CurveTestBase {
         onSetKind = holder::setBandKind,
         onSetEnabled = holder::setBandEnabled,
         onDeleteBand = holder::removeBand,
+        onNudgeFrequency = holder::nudgeBandFrequency,
+        onNudgeGain = holder::nudgeBandGain,
+        onScaleQ = holder::scaleBandQ,
+        onAddBandFromList = holder::addBandFromList,
     )
 
     /** The card with its interaction layer filling the window. */

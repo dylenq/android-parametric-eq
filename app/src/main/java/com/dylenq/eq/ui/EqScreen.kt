@@ -88,6 +88,10 @@ fun EqScreen(
             onSetKind = holder::setBandKind,
             onSetEnabled = holder::setBandEnabled,
             onDeleteBand = holder::removeBand,
+            onNudgeFrequency = holder::nudgeBandFrequency,
+            onNudgeGain = holder::nudgeBandGain,
+            onScaleQ = holder::scaleBandQ,
+            onAddBandFromList = holder::addBandFromList,
         )
     }
 
