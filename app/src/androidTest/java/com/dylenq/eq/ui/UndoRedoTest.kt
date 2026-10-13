@@ -215,4 +215,120 @@ class UndoRedoTest {
         compose.waitForIdle()
         assertEquals("Ctrl+Y redoes", 4f, ctrl.snapshot().graphicGainsDb[0], 0.01f)
     }
+
+    // ----- Task 2: undoable snackbars -----
+
+    private fun waitGone(text: String) = compose.waitUntil(8_000) { gone(text) }
+
+    @Test fun deletingABandShowsItsSnackbarAndUndoRestoresTheBand() {
+        launch(EqMode.PARAMETRIC)
+        val before = ctrl.snapshot().bands[3]
+        holder.removeBand(3)
+        compose.waitForIdle()
+        assertEquals(6, ctrl.snapshot().bands.size)
+        compose.onNodeWithText("Band 4 deleted").assertExists()
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitForIdle()
+        assertEquals(7, ctrl.snapshot().bands.size)
+        assertEquals(before, ctrl.snapshot().bands[3])
+    }
+
+    @Test fun removeAllShowsItsSnackbarAndUndoRestoresEveryBand() {
+        launch(EqMode.PARAMETRIC)
+        val before = ctrl.snapshot().bands
+        holder.removeAllBands()
+        compose.waitForIdle()
+        assertEquals(0, ctrl.snapshot().bands.size)
+        compose.onNodeWithText("All bands removed").assertExists()
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitForIdle()
+        assertEquals(before, ctrl.snapshot().bands)
+    }
+
+    @Test fun resetShowsItsSnackbarAndUndoRestoresTheOldState() {
+        launch(EqMode.PARAMETRIC)
+        holder.setBandKind(1, com.dylenq.eq.core.FilterKind.HIGH_SHELF)
+        holder.setPreamp(-4f)
+        compose.waitForIdle()
+        holder.resetAll()
+        compose.waitForIdle()
+        compose.onNodeWithText("Bands and preamp reset").assertExists()
+        assertEquals(0f, ctrl.snapshot().preampDb, 0f)
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitForIdle()
+        assertEquals(com.dylenq.eq.core.FilterKind.HIGH_SHELF, ctrl.snapshot().bands[1].kind)
+        assertEquals(-4f, ctrl.snapshot().preampDb, 0f)
+    }
+
+    @Test fun resetFromTheOverflowMenuInParametricShowsTheNewMessageOnce() {
+        launch(EqMode.PARAMETRIC)
+        holder.setBandKind(1, com.dylenq.eq.core.FilterKind.HIGH_SHELF)
+        compose.waitForIdle()
+        compose.onNodeWithTag("overflow").performClick()
+        compose.onNodeWithTag("reset-all").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Bands and preamp reset").assertExists()
+        assertTrue("old Graphic text is not used", gone(RESET_ALL_MESSAGE))
+        assertEquals("one Undo action", 1, compose.onAllNodesWithText("Undo").fetchSemanticsNodes().size)
+    }
+
+    @Test fun aLaterEditDismissesTheSnackbarSoItsUndoCannotRevertThatEdit() {
+        launch(EqMode.PARAMETRIC)
+        holder.removeBand(3)
+        compose.waitForIdle()
+        compose.onNodeWithText("Band 4 deleted").assertExists()
+        holder.setPreamp(-2f)
+        waitGone("Band 4 deleted")
+        assertEquals(-2f, ctrl.snapshot().preampDb, 0f)
+        assertEquals("the delete stays", 6, ctrl.snapshot().bands.size)
+    }
+
+    @Test fun anUndoOrRedoAlsoDismissesTheSnackbar() {
+        launch(EqMode.PARAMETRIC)
+        holder.removeBand(3)
+        compose.waitForIdle()
+        compose.onNodeWithTag("undo").performClick()
+        waitGone("Band 4 deleted")
+        assertEquals(7, ctrl.snapshot().bands.size)
+        compose.onNodeWithTag("redo").performClick()
+        compose.waitForIdle()
+        assertEquals("redo re-applies the delete without a snackbar", 6, ctrl.snapshot().bands.size)
+        assertTrue(gone("Band 4 deleted"))
+    }
+
+    @Test fun redoAfterTheSnackbarUndoIsAvailableFromTheTopBar() {
+        launch(EqMode.PARAMETRIC)
+        holder.removeBand(3)
+        compose.waitForIdle()
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("redo").assertIsEnabled()
+        compose.onNodeWithTag("redo").performClick()
+        compose.waitForIdle()
+        assertEquals(6, ctrl.snapshot().bands.size)
+    }
+
+    @Test fun theSixteenBandMessageHasNoUndoAndIsPlain() {
+        launch(EqMode.PARAMETRIC)
+        while (ctrl.snapshot().bands.size < 16) holder.addBandFromList()
+        compose.waitForIdle()
+        // The last successful add also showed nothing undoable; clear any snackbar first.
+        compose.waitForIdle()
+        holder.addBandFromList()
+        compose.waitForIdle()
+        compose.onNodeWithText("All 16 bands are in use. Remove one to add another.").assertExists()
+        assertTrue("no Undo action on the limit message", gone("Undo"))
+        assertEquals(16, ctrl.snapshot().bands.size)
+    }
+
+    @Test fun aNewMessageReplacesTheOneOnScreen() {
+        launch(EqMode.PARAMETRIC)
+        holder.removeBand(3)
+        compose.waitForIdle()
+        compose.onNodeWithText("Band 4 deleted").assertExists()
+        holder.removeAllBands()
+        compose.waitUntil(8_000) { !gone("All bands removed") }
+        waitGone("Band 4 deleted")
+        assertEquals(1, compose.onAllNodesWithText("Undo").fetchSemanticsNodes().size)
+    }
 }
