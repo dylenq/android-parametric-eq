@@ -85,8 +85,10 @@ class EqRuntime(
 
     // Bypass is core state, so the very first status already carries the loaded value instead of
     // waiting for the worker's first publishStatus (a cold-start UI would otherwise flash "on").
+    // The persisted global mode is seeded the same way; the worker applies it before its first
+    // publish, and a rejection then corrects the status through onGlobalRejected.
     private val _status = MutableStateFlow(
-        ServiceStatus(bypass = controller.snapshot().bypass, notice = when (opened.second) {
+        ServiceStatus(bypass = controller.snapshot().bypass, globalMode = settings.globalMode, notice = when (opened.second) {
             is StoreNotice.NewerVersion -> "Saved settings were made by a newer version and were set aside"
             StoreNotice.Damaged -> "Saved settings were damaged and were set aside"
             null -> null
@@ -99,12 +101,14 @@ class EqRuntime(
 
     val isAttached: Boolean get() = attached.get()
 
-    init {
-        // The persisted global-mode choice is the first command the worker sees.
-        if (settings.globalMode) events.trySend(Command.SetGlobal(true))
-    }
-
     private val job = scope.launch {
+        // The persisted global-mode choice is applied before the first publish, so the first
+        // published status reports the real state (a rejection flips the setting and sets the notice).
+        try {
+            if (settings.globalMode) manager.setGlobalMode(true)
+        } catch (t: Throwable) {
+            Log.e("EQ-SVC", "initial global mode failed: ${t.javaClass.name}: ${t.message}")
+        }
         publishStatus()
         while (isActive) {
             try {

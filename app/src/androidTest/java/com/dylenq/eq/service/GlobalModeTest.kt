@@ -129,6 +129,9 @@ class GlobalModeTest {
         val f = FakeEffectFactory()
         val r2 = EqRuntime(f, File(rt.dir, "second").also { it.mkdirs() }, rt.settings)
         try {
+            // The status is now seeded from the setting, so wait for the worker (which applies it
+            // before its first publish) and check the manager really is in global mode.
+            assertTrue(r2.inspect { it.isGlobalOn() })
             assertTrue(poll { r2.status.value.globalMode })
             assertEquals(1, f.callCount(0, "create"))
         } finally {
