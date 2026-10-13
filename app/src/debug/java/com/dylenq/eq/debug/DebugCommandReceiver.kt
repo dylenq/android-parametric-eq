@@ -76,8 +76,9 @@ class DebugCommandReceiver : BroadcastReceiver() {
         }
         val band = com.dylenq.eq.core.Band(
             kind,
-            if (intent.hasExtra("freq")) intent.getFloatExtra("freq", cur.freq) else cur.freq,
-            if (intent.hasExtra("gain")) intent.getFloatExtra("gain", cur.gainDb) else cur.gainDb,
+            // "hz" and "db" are the older extra names (rotation-soak.sh); both spellings work.
+            if (intent.hasExtra("freq")) intent.getFloatExtra("freq", cur.freq) else intent.getFloatExtra("hz", cur.freq),
+            if (intent.hasExtra("gain")) intent.getFloatExtra("gain", cur.gainDb) else intent.getFloatExtra("db", cur.gainDb),
             if (intent.hasExtra("q")) intent.getFloatExtra("q", cur.q) else cur.q,
             if (intent.hasExtra("enabled")) intent.getBooleanExtra("enabled", cur.enabled) else cur.enabled,
         )
