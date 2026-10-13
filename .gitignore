@@ -13,3 +13,4 @@ __pycache__/
 core/tools/golden-gen/target/
 .kotlin/
 keystore.properties
+graphify-out/
