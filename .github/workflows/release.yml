@@ -38,11 +38,11 @@ jobs:
 
       # Assumption: sdkmanager lives in $ANDROID_HOME/cmdline-tools/latest/bin on runner images.
       # The runner ships NDK 27.3, 29 and 30 only; app/build.gradle.kts pins 27.1.12297006.
-      - name: Install the pinned NDK
+      - name: Install the pinned NDK, build-tools and platform
         run: |
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$SDKMANAGER" --licenses > /dev/null || true
-          "$SDKMANAGER" "ndk;27.1.12297006"
+          "$SDKMANAGER" "ndk;27.1.12297006" "build-tools;36.0.0" "platforms;android-37.0"
 
       # Assumption: rustup and cargo are preinstalled on the runner (cargo-ndk 4.1.2 is the
       # version used since Phase 1).
@@ -66,7 +66,12 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.EQ_KEYSTORE_BASE64 }}
         run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "the EQ_KEYSTORE_BASE64 secret is empty or not set" >&2
+            exit 1
+          fi
           printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          test -s "$RUNNER_TEMP/release.jks"
           chmod 600 "$RUNNER_TEMP/release.jks"
 
       - name: Build the signed APK

@@ -116,7 +116,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-13. Watch the workflow run in the Actions tab. If it fails, fix the cause and delete and re-push the tag; remember it has never run. When it succeeds it leaves a draft release with `EQ-0.1.0.apk`. Download that APK, run `apksigner verify --print-certs` on it and compare the fingerprint with step 5, then publish the draft.
+13. Watch the workflow run in the Actions tab. If it fails, fix the cause and delete and re-push the tag; remember it has never run. When it succeeds it leaves a draft release with `EQ-0.1.0.apk`. Download that APK, run `apksigner verify --print-certs` on it (`apksigner` is in the Android SDK under `build-tools/36.0.0/`) and compare the fingerprint with step 5, then publish the draft.
 
 ## Decision for you at publish time
 
