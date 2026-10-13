@@ -31,6 +31,9 @@ class EqController internal constructor(
         on
     }
 
+    /** The Rust core's version string (About row). */
+    fun coreVersion(): String = core.version()
+
     /** Starts one undo step; pair with [endEdit]. */
     fun beginEdit() = core.beginEdit()
 

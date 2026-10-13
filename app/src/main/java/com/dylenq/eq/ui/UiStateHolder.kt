@@ -54,6 +54,9 @@ class UiStateHolder(val runtime: EqRuntime) {
     )
     val ui: StateFlow<EqUiState> = _ui.asStateFlow()
 
+    /** Rust core version for the Settings About row. */
+    fun coreVersion(): String = controller.coreVersion()
+
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     /** One-shot error events ("Couldn't apply that change."); the UI shows a snackbar. */

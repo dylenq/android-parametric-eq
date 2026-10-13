@@ -97,15 +97,7 @@ fun BannerSlot(
         exit = if (reduced) shrinkVertically(snap()) + fadeOut(snap()) else shrinkVertically(tween(250, easing = Emphasized)) + fadeOut(tween(250)),
     ) {
         when (shown) {
-            BannerKind.NOTICE -> Banner(
-                tag = "banner-notice",
-                container = MaterialTheme.colorScheme.tertiaryContainer,
-                content = MaterialTheme.colorScheme.onTertiaryContainer,
-                icon = R.drawable.ic_info,
-                title = null,
-                text = notice ?: "",
-                actions = { TextButton(onClick = onDismissNotice, modifier = Modifier.testTag("banner-dismiss")) { Text("Dismiss") } },
-            )
+            BannerKind.NOTICE -> NoticeBanner(notice ?: "", onDismissNotice)
             BannerKind.RATIONALE -> Banner(
                 tag = "banner-rationale",
                 container = MaterialTheme.colorScheme.secondaryContainer,
@@ -152,6 +144,20 @@ fun BannerSlot(
             null -> {}
         }
     }
+}
+
+/** A runtime notice (plain text) with Dismiss; also rendered by Settings for a rejected global mode. */
+@Composable
+fun NoticeBanner(text: String, onDismiss: () -> Unit) {
+    Banner(
+        tag = "banner-notice",
+        container = MaterialTheme.colorScheme.tertiaryContainer,
+        content = MaterialTheme.colorScheme.onTertiaryContainer,
+        icon = R.drawable.ic_info,
+        title = null,
+        text = text,
+        actions = { TextButton(onClick = onDismiss, modifier = Modifier.testTag("banner-dismiss")) { Text("Dismiss") } },
+    )
 }
 
 @Composable
