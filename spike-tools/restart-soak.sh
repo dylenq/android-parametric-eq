@@ -92,6 +92,12 @@ FILES="files"  # run-as relative path to filesDir
 
 edit() { "$ADB" shell am broadcast -n "$RCV" --es cmd set-graphic-gain --ei index 3 --ef db "$1" >/dev/null; }
 
+# global_on, global_edit and session_global leave global mode switched on (persisted in the app's settings);
+# switch it off again so later runs (the instrumented suite shares the app data) start from the default.
+# Found in plan 05-12: the connected suite failed BypassTest/TracerTest after a session_global smoke.
+cleanup_global() { "$ADB" shell am broadcast -n "$RCV" --es cmd set-global --es value off >/dev/null 2>&1 || true; }
+trap cleanup_global EXIT
+
 pass=0; failn=0
 declare -a SUMMARY
 for c in $(seq 1 "$N"); do
