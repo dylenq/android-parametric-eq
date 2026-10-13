@@ -84,7 +84,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     // make one step. Each source has its own flag so a double start or an unmatched end is harmless.
     // Guarded by [lock].
     private var gestureDepth = 0
-    private enum class Source { GRAPHIC, PREAMP, PARAMETRIC, ADD }
+    private enum class Source { GRAPHIC, PREAMP, PARAMETRIC, ADD, FIELD }
     private val openSources = java.util.EnumSet.noneOf(Source::class.java)
 
     /** Opens [source]'s share of the group; a second start from the same source is ignored. */
@@ -411,6 +411,55 @@ class UiStateHolder(val runtime: EqRuntime) {
         }
         republishLocked()
         if (index >= 0) _ui.update { s -> if (index in s.bands.indices) s.copy(selectedBand = index) else s }
+    }
+
+    // ---- band list text fields (one undo step per focus session) ----------------------------
+
+    /** First field of a row gained focus: selects the band and opens the session's undo group (idempotent). */
+    fun bandFieldFocusGained(index: Int) = guarded {
+        if (bandAt(index) == null) return@guarded
+        beginGesture(Source.FIELD)
+        _ui.update { s -> if (index in s.bands.indices) s.copy(selectedBand = index) else s }
+    }
+
+    /**
+     * Sets any of frequency, gain and Q of band [index] (null keeps it). Values are clamped to the core
+     * limits and ignored when not finite; gain is ignored for pass kinds. Inside a session it joins the
+     * session's undo step, outside one it is a step of its own. An unchanged band writes nothing.
+     */
+    fun setBandFromField(index: Int, freqHz: Float? = null, gainDb: Float? = null, q: Float? = null) = guarded {
+        val band = bandAt(index) ?: return@guarded
+        if (freqHz?.isFinite() == false || gainDb?.isFinite() == false || q?.isFinite() == false) return@guarded
+        var next = band
+        if (freqHz != null) next = next.copy(freq = freqHz.coerceIn(ParametricMath.MIN_HZ, ParametricMath.MAX_HZ))
+        if (gainDb != null && band.kind.hasGain()) {
+            next = next.copy(gainDb = gainDb.coerceIn(-ParametricMath.MAX_GAIN_DB, ParametricMath.MAX_GAIN_DB))
+        }
+        if (q != null) next = next.copy(q = q.coerceIn(ParametricMath.MIN_Q, ParametricMath.MAX_Q))
+        if (next == band) return@guarded
+        writeBand(index, next)
+    }
+
+    /** The "Change sign of gain" button: flips +3.5 to -3.5 and back; pass kinds and exactly 0 dB do nothing. */
+    fun flipBandGainSign(index: Int) {
+        val band = controller.snapshot().bands.getOrNull(index) ?: return
+        if (!band.kind.hasGain() || band.gainDb == 0f) return
+        setBandFromField(index, gainDb = -band.gainDb)
+    }
+
+    /** The field session ended (no field of the row has focus any more): closes the undo step. Idempotent. */
+    fun bandFieldFocusLost() {
+        try {
+            synchronized(lock) {
+                endGesture(Source.FIELD)
+            }
+        } catch (e: Exception) {
+            if (!isCoreFailure(e)) throw e
+            fail()
+        } finally {
+            republish()
+            refreshCurve()
+        }
     }
 
     /** Moves band [index] by [steps] twelfths of an octave (negative = down). */
