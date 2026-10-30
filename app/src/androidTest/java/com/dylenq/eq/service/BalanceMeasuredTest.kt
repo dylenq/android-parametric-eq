@@ -18,7 +18,7 @@ import org.junit.runner.RunWith
 /**
  * Balance measured through the production effect path with Visualizer(0): a one-sided test tone
  * is attenuated only when the balance pushes against that side. Also settles DynamicsProcessing
- * channel order (channel 0 = left) and that the -60 dB floor is accepted by the real effect.
+ * channel order (channel 0 = left) and that the -84 dB absolute floor (preamp -24 + the full -60 dB balance attenuation) is accepted by the real effect.
  */
 @RunWith(AndroidJUnit4::class)
 class BalanceMeasuredTest {
@@ -73,7 +73,7 @@ class BalanceMeasuredTest {
             Thread.sleep(300)
             val l = runtime.inspect { m -> m.handleFor(rig.sessionId)!!.readInputGain(CH_LEFT) }
             val r = runtime.inspect { m -> m.handleFor(rig.sessionId)!!.readInputGain(CH_RIGHT) }
-            assertEquals("left floored gain read back", -60.0, l.toDouble(), 0.01)
+            assertEquals("left gain (preamp -24 + 60 dB attenuation) read back", -84.0, l.toDouble(), 0.01)
             assertEquals("right gain is the preamp only", -24.0, r.toDouble(), 0.01)
             assertTrue("session must not be FAILED", runtime.inspect { m ->
                 m.sessionInfos().none { it.state == SessionState.FAILED }

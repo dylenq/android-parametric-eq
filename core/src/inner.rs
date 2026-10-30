@@ -20,8 +20,11 @@ pub const TONE_BASS_HZ: f64 = 100.0;
 pub const TONE_TREBLE_HZ: f64 = 10_000.0;
 pub const TONE_Q: f64 = 0.707;
 pub const TONE_MAX_DB: f32 = 12.0;
-/// Lowest per-channel input gain the core hands to the engine.
-pub const MIN_CHANNEL_GAIN_DB: f32 = -60.0;
+/// Largest balance attenuation of the quieter side, relative to the louder side.
+pub const MAX_BALANCE_ATTENUATION_DB: f32 = -60.0;
+/// Lowest absolute per-channel input gain the core hands to the engine (DynamicsProcessing-safe;
+/// preamp -24 plus the full -60 dB balance attenuation).
+pub const MIN_CHANNEL_GAIN_DB: f32 = -84.0;
 /// Balance magnitudes at or below this snap to centre.
 const BALANCE_SNAP: f32 = 0.01;
 
@@ -420,16 +423,16 @@ fn snap_balance(v: f32) -> f32 {
     if c.abs() <= BALANCE_SNAP { 0.0 } else { c }
 }
 
-/// Attenuation (dB, <= 0) of the quieter channel: 20*log10(1 - |b|), floored at -60 dB.
+/// Attenuation (dB, <= 0) of the quieter channel: 20*log10(1 - |b|), floored at -60 dB (relative to the louder side).
 fn balance_attenuation_db(b: f32) -> f32 {
     if b == 0.0 {
         return 0.0;
     }
     let rem = 1.0 - (b.abs() as f64);
     if rem <= 0.0 {
-        return MIN_CHANNEL_GAIN_DB;
+        return MAX_BALANCE_ATTENUATION_DB;
     }
-    ((20.0 * rem.log10()) as f32).max(MIN_CHANNEL_GAIN_DB)
+    ((20.0 * rem.log10()) as f32).max(MAX_BALANCE_ATTENUATION_DB)
 }
 
 /// Frequency of point `i` of `n` on the shared 20 Hz..20 kHz log grid.

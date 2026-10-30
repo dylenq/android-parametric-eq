@@ -554,15 +554,26 @@ fn balance_floor_and_channel_floor() {
     core.set_preamp(-24.0).unwrap();
     core.set_balance(1.0).unwrap();
     let e = core.engine_params(48000, 85.3).unwrap();
-    assert_eq!(e.input_gain_left_db, eq_core::inner::MIN_CHANNEL_GAIN_DB);
+    // The louder side is exactly the preamp; the quieter side is a full 60 dB below it.
     assert_eq!(e.input_gain_right_db, -24.0);
+    assert_eq!(e.input_gain_left_db, -24.0 + eq_core::inner::MAX_BALANCE_ATTENUATION_DB);
+    assert!(e.input_gain_left_db >= eq_core::inner::MIN_CHANNEL_GAIN_DB);
     for p in [-24.0f32, -12.0, 0.0, 24.0] {
         for b in [-1.0f32, -0.99, -0.5, 0.0, 0.5, 0.99, 1.0] {
             core.set_preamp(p).unwrap();
             core.set_balance(b).unwrap();
             let e = core.engine_params(48000, 85.3).unwrap();
-            assert!(e.input_gain_left_db >= -60.0 && e.input_gain_right_db >= -60.0);
-            assert!(e.input_gain_left_db.is_finite() && e.input_gain_right_db.is_finite());
+            let (l, r) = (e.input_gain_left_db, e.input_gain_right_db);
+            assert!(l.is_finite() && r.is_finite());
+            assert!(l >= eq_core::inner::MIN_CHANNEL_GAIN_DB && r >= eq_core::inner::MIN_CHANNEL_GAIN_DB);
+            // The louder side is the preamp; the quieter side is never more than 60 dB below it,
+            // independent of the preamp.
+            assert_eq!(l.max(r), p);
+            let rel = l.min(r) - p;
+            assert!(rel >= eq_core::inner::MAX_BALANCE_ATTENUATION_DB - 1e-3, "p={p} b={b} rel={rel}");
+            if b >= 0.99 {
+                assert!(rel <= -40.0, "p={p} b={b} rel={rel}");
+            }
         }
     }
 }
