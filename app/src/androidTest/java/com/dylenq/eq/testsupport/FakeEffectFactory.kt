@@ -13,13 +13,16 @@ class FakeEffectFactory : EffectFactory {
     private val log = ArrayList<Call>()
     private val handles = ConcurrentHashMap<Int, FakeHandle>()
     private val created = ArrayList<Pair<Int, EngineParams>>()
-    private var nextCreateFault: Throwable? = null
+    private var createFaults = 0
+    private var createFault: Throwable? = null
     private val sessionFaults = ConcurrentHashMap<Int, Throwable>()
     private val failAfterCalls = ConcurrentHashMap<Int, Int>()
     private val lost = ConcurrentHashMap.newKeySet<Int>()
     private val enableRejected = ConcurrentHashMap.newKeySet<Int>()
 
-    fun failNextCreate(t: Throwable) { synchronized(lock) { nextCreateFault = t } }
+    fun failNextCreate(t: Throwable) = failNextCreates(1, t)
+    /** The next [n] create calls throw [t]. */
+    fun failNextCreates(n: Int, t: Throwable) { synchronized(lock) { createFaults = n; createFault = t } }
     fun failSession(session: Int, t: Throwable) { sessionFaults[session] = t }
     /** Every handle created after this call throws once it has served [calls] mutator calls. */
     @Volatile var failAfter: Int? = null
@@ -39,7 +42,7 @@ class FakeEffectFactory : EffectFactory {
         synchronized(lock) {
             created.add(session to params)
             log.add(Call(session, "create", listOf(params)))
-            nextCreateFault?.let { nextCreateFault = null; throw it }
+            if (createFaults > 0) { createFaults--; throw createFault!! }
         }
         sessionFaults[session]?.let { throw it }
         val h = FakeHandle(session, params, failAfter)

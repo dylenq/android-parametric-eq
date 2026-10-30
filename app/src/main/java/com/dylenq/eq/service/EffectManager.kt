@@ -20,6 +20,8 @@ class EffectManager(
     private val maxSessions: Int = DEFAULT_MAX_SESSIONS,
     /** Called on the worker after global mode was refused and per-session effects were restored. */
     private val onGlobalRejected: (String) -> Unit = {},
+    /** Pause between create attempts; injected so tests never sleep. */
+    private val sleeper: Sleeper = Sleeper { Thread.sleep(it) },
 ) {
     private data class Key(val layoutId: UInt, val sampleRate: UInt, val frameDurationMs: Float)
     private data class Lim(val limiter: LimiterParams, val enabled: Boolean)
@@ -268,7 +270,10 @@ class EffectManager(
     }
 
     private fun build(id: Int, pkg: String, p: EngineParams, lastSeen: Long): Entry {
-        val h = factory.create(id, p)
+        val h = retrying(
+            CREATE_ATTEMPTS, CREATE_BACKOFF_MS, sleeper,
+            { attempt, t -> Log.i(TAG, "create retry $attempt session=$id: ${t.javaClass.name}: ${t.message}") },
+        ) { factory.create(id, p) }
         val state = try {
             if (h.hasControl()) SessionState.OK else SessionState.NO_CONTROL
         } catch (t: Throwable) {
@@ -324,5 +329,11 @@ class EffectManager(
 
         /** Gain differences at or below this are inaudible and are not sent (Assumption A3). */
         const val GAIN_EPSILON_DB = 0.01f
+
+        /** Total create attempts per build; transient failures right after a session opens are common. */
+        const val CREATE_ATTEMPTS = 3
+
+        /** Pause after the first and second failed attempt. */
+        val CREATE_BACKOFF_MS = longArrayOf(50L, 100L)
     }
 }
