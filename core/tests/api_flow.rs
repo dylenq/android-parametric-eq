@@ -413,3 +413,236 @@ fn engine_band_cap_is_untouched_by_undo_redo_and_not_saved() {
     assert_eq!(got.layout_id, want.layout_id);
     assert!(got.cutoffs_hz.len() > 64);
 }
+
+// ---------------------------------------------------------------- tone and balance
+
+fn ideal_at(c: &eq_core::api::CurveData, hz: f32) -> f32 {
+    let i = c
+        .freqs_hz
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (a.1 - hz).abs().partial_cmp(&(b.1 - hz).abs()).unwrap())
+        .unwrap()
+        .0;
+    c.ideal_db[i]
+}
+
+#[test]
+fn tone_tracer() {
+    let flat = EqCore::new();
+    let core = EqCore::new();
+    core.set_bass(12.0).unwrap();
+    assert_eq!(core.snapshot().bass_db, 12.0);
+    let c = core.response_curve(512, 48000, 85.3).unwrap();
+    let f = flat.response_curve(512, 48000, 85.3).unwrap();
+    assert!(ideal_at(&c, 50.0) > 6.0, "{}", ideal_at(&c, 50.0));
+    assert!(ideal_at(&c, 20.0) > 10.0);
+    assert!(ideal_at(&c, 8000.0).abs() < 0.5);
+    assert_ne!(c.achieved_db, f.achieved_db);
+    let e = core.engine_params(48000, 85.3).unwrap();
+    let e0 = flat.engine_params(48000, 85.3).unwrap();
+    assert_eq!(e0.peak_db, 0.0);
+    assert!(e.peak_db > 9.0, "{}", e.peak_db);
+    assert!(e.suggested_preamp_db < -9.0, "{}", e.suggested_preamp_db);
+    assert!(e.suggested_preamp_db < e0.suggested_preamp_db);
+    // Treble moves the high end.
+    let t = EqCore::new();
+    t.set_treble(-12.0).unwrap();
+    let tc = t.response_curve(512, 48000, 85.3).unwrap();
+    assert!(ideal_at(&tc, 18000.0) < -8.0);
+    assert!(ideal_at(&tc, 200.0).abs() < 0.5);
+}
+
+#[test]
+fn zero_tone_is_bit_identical() {
+    let fresh = EqCore::new();
+    let core = EqCore::new();
+    core.set_bass(5.0).unwrap();
+    core.set_treble(-3.0).unwrap();
+    core.set_bass(0.0).unwrap();
+    core.set_treble(0.0).unwrap();
+    for mode in [EqMode::Graphic, EqMode::Parametric] {
+        fresh.set_mode(mode);
+        core.set_mode(mode);
+        let a = fresh.engine_params(48000, 85.3).unwrap();
+        let b = core.engine_params(48000, 85.3).unwrap();
+        assert_eq!(a.gains_db, b.gains_db);
+        assert_eq!(a.layout_id, b.layout_id);
+        assert_eq!(a.peak_db, b.peak_db);
+        assert_eq!(a.suggested_preamp_db, b.suggested_preamp_db);
+        assert_eq!(
+            fresh.response_curve(256, 48000, 85.3).unwrap(),
+            core.response_curve(256, 48000, 85.3).unwrap()
+        );
+    }
+}
+
+#[test]
+fn tone_setters_clamp_and_reject_non_finite() {
+    let core = EqCore::new();
+    core.set_bass(99.0).unwrap();
+    core.set_treble(-99.0).unwrap();
+    let s = core.snapshot();
+    assert_eq!((s.bass_db, s.treble_db), (12.0, -12.0));
+    let before = core.snapshot();
+    for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        assert_eq!(core.set_bass(bad), Err(EqError::InvalidValue));
+        assert_eq!(core.set_treble(bad), Err(EqError::InvalidValue));
+        assert_eq!(core.set_balance(bad), Err(EqError::InvalidValue));
+    }
+    assert_eq!(core.snapshot(), before);
+    let fresh = EqCore::new();
+    assert_eq!(fresh.set_bass(f32::NAN), Err(EqError::InvalidValue));
+    assert!(!fresh.snapshot().can_undo);
+}
+
+#[test]
+fn tone_edit_is_undoable() {
+    let core = EqCore::new();
+    core.set_bass(6.0).unwrap();
+    assert!(core.snapshot().can_undo);
+    assert!(core.undo());
+    assert_eq!(core.snapshot().bass_db, 0.0);
+    assert!(core.redo());
+    assert_eq!(core.snapshot().bass_db, 6.0);
+    core.begin_edit();
+    for v in [7.0, 8.0, 9.0] {
+        core.set_treble(v).unwrap();
+    }
+    core.end_edit();
+    assert_eq!(core.snapshot().treble_db, 9.0);
+    assert!(core.undo());
+    assert_eq!(core.snapshot().treble_db, 0.0);
+    assert_eq!(core.snapshot().bass_db, 6.0);
+}
+
+fn near(a: f32, b: f32, tol: f32) -> bool {
+    (a - b).abs() <= tol
+}
+
+#[test]
+fn balance_attenuates_only_the_quieter_side() {
+    let core = EqCore::new();
+    core.set_preamp(-2.5).unwrap();
+    core.set_balance(0.5).unwrap();
+    let e = core.engine_params(48000, 85.3).unwrap();
+    assert_eq!(e.input_gain_right_db, -2.5);
+    assert!(near(e.input_gain_left_db, -2.5 - 6.0206, 1e-3), "{}", e.input_gain_left_db);
+    assert_eq!(e.input_gain_db, -2.5);
+}
+
+#[test]
+fn balance_sign_convention() {
+    let core = EqCore::new();
+    core.set_balance(1.0).unwrap();
+    let e = core.engine_params(48000, 85.3).unwrap();
+    assert_eq!(e.input_gain_right_db, 0.0);
+    assert_eq!(e.input_gain_left_db, -60.0);
+    core.set_balance(-1.0).unwrap();
+    let e = core.engine_params(48000, 85.3).unwrap();
+    assert_eq!(e.input_gain_left_db, 0.0);
+    assert_eq!(e.input_gain_right_db, -60.0);
+    core.set_balance(-0.5).unwrap();
+    let e = core.engine_params(48000, 85.3).unwrap();
+    assert_eq!(e.input_gain_left_db, 0.0);
+    assert!(e.input_gain_right_db < -6.0 && e.input_gain_right_db > -6.1);
+}
+
+#[test]
+fn balance_floor_and_channel_floor() {
+    let core = EqCore::new();
+    core.set_preamp(-24.0).unwrap();
+    core.set_balance(1.0).unwrap();
+    let e = core.engine_params(48000, 85.3).unwrap();
+    assert_eq!(e.input_gain_left_db, eq_core::inner::MIN_CHANNEL_GAIN_DB);
+    assert_eq!(e.input_gain_right_db, -24.0);
+    for p in [-24.0f32, -12.0, 0.0, 24.0] {
+        for b in [-1.0f32, -0.99, -0.5, 0.0, 0.5, 0.99, 1.0] {
+            core.set_preamp(p).unwrap();
+            core.set_balance(b).unwrap();
+            let e = core.engine_params(48000, 85.3).unwrap();
+            assert!(e.input_gain_left_db >= -60.0 && e.input_gain_right_db >= -60.0);
+            assert!(e.input_gain_left_db.is_finite() && e.input_gain_right_db.is_finite());
+        }
+    }
+}
+
+#[test]
+fn balance_snap_and_clamp_and_non_finite() {
+    let core = EqCore::new();
+    core.set_balance(0.005).unwrap();
+    assert_eq!(core.snapshot().balance, 0.0);
+    core.set_balance(-0.01).unwrap();
+    assert_eq!(core.snapshot().balance, 0.0);
+    assert!(!core.snapshot().can_undo);
+    core.set_balance(5.0).unwrap();
+    assert_eq!(core.snapshot().balance, 1.0);
+    core.set_balance(-5.0).unwrap();
+    assert_eq!(core.snapshot().balance, -1.0);
+    assert_eq!(core.set_balance(f32::NAN), Err(EqError::InvalidValue));
+    assert_eq!(core.snapshot().balance, -1.0);
+}
+
+#[test]
+fn balance_does_not_change_suggested_preamp() {
+    let a = EqCore::new();
+    let b = EqCore::new();
+    for c in [&a, &b] {
+        c.set_graphic_gain(3, 9.0).unwrap();
+    }
+    b.set_balance(0.7).unwrap();
+    let ea = a.engine_params(48000, 85.3).unwrap();
+    let eb = b.engine_params(48000, 85.3).unwrap();
+    assert_eq!(ea.peak_db, eb.peak_db);
+    assert_eq!(ea.suggested_preamp_db, eb.suggested_preamp_db);
+    assert_eq!(ea.gains_db, eb.gains_db);
+}
+
+#[test]
+fn balance_centre_equals_preamp() {
+    let core = EqCore::new();
+    core.set_preamp(-7.25).unwrap();
+    let e = core.engine_params(48000, 85.3).unwrap();
+    assert_eq!(e.input_gain_left_db, -7.25);
+    assert_eq!(e.input_gain_right_db, -7.25);
+    assert_eq!(e.input_gain_db, -7.25);
+}
+
+#[test]
+fn balance_is_undoable() {
+    let core = EqCore::new();
+    core.set_balance(0.4).unwrap();
+    assert!(core.undo());
+    assert_eq!(core.snapshot().balance, 0.0);
+    assert!(core.redo());
+    assert_eq!(core.snapshot().balance, 0.4);
+    core.begin_edit();
+    for v in [0.5, 0.6, 0.7] {
+        core.set_balance(v).unwrap();
+    }
+    core.end_edit();
+    assert!(core.undo());
+    assert_eq!(core.snapshot().balance, 0.4);
+}
+
+#[test]
+fn reset_bands_leaves_tone_and_balance_alone() {
+    let core = EqCore::new();
+    core.set_bass(4.0).unwrap();
+    core.set_treble(-2.0).unwrap();
+    core.set_balance(0.3).unwrap();
+    core.set_preamp(-3.0).unwrap();
+    core.reset_bands();
+    let s = core.snapshot();
+    assert_eq!((s.bass_db, s.treble_db, s.balance, s.preamp_db), (4.0, -2.0, 0.3, 0.0));
+}
+
+#[test]
+fn tone_and_balance_do_not_clear_bypass_flag() {
+    let core = EqCore::new();
+    core.set_bass(6.0).unwrap();
+    core.set_balance(0.5).unwrap();
+    core.set_bypass(true);
+    let e = core.engine_params(48000, 85.3).unwrap();
+    assert!(e.bypass);
+}

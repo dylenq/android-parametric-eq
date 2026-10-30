@@ -243,6 +243,36 @@ fn table_shelves_and_broad_peaks() {
     }
 }
 
+/// Tone shelves (100 Hz low, 10 kHz high, Q 0.707, +-12 dB) at 170.6 ms: pinned at measured
+/// worst (0.0445 dB) + 0.05 dB, rounded up.
+const TONE_GUARD_170: f64 = 0.10;
+
+fn tone_shelf(kind: FilterKind, f0: f32, g: f32) -> Band {
+    let mut b = Band::new(kind, f0);
+    b.gain_db = g;
+    b.q = 0.707;
+    b
+}
+
+#[test]
+fn tone_shelves_fit() {
+    let g85 = Grid::hybrid(SR, 85.3).unwrap();
+    let g170 = Grid::hybrid(SR, 170.6).unwrap();
+    let mut worst170: f64 = 0.0;
+    for g in [12.0f32, -12.0] {
+        for (kind, f0) in [(FilterKind::LowShelf, 100.0), (FilterKind::HighShelf, 10_000.0)] {
+            let b = tone_shelf(kind, f0, g);
+            let e85 = band_error(&g85, b);
+            let e170 = band_error(&g170, b);
+            println!("tone {kind:?} g {g}: 85.3 {e85:.3} dB, 170.6 {e170:.3} dB");
+            assert!(e85 <= TOL_HALF_DB, "{kind:?} {g}: {e85}");
+            worst170 = worst170.max(e170);
+        }
+    }
+    println!("tone worst at 170.6: {worst170:.4}");
+    assert!(worst170 <= TONE_GUARD_170, "{worst170}");
+}
+
 /// Broad peaks at 50 Hz, 85.3 ms, scored from 20 Hz up: a measured limitation of the 11.7 Hz bin
 /// width (a Q 1 peak at 50 Hz is about 4 bins wide). The values are observations, not
 /// requirements; a rise means a regression. Pinned at measured worst + 0.05 dB, rounded up to

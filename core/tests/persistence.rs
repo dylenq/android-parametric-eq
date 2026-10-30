@@ -44,6 +44,9 @@ fn heavy() -> Inner {
         s.set_graphic_gain(i, i as f32 * 0.75 - 11.0).unwrap();
     }
     s.set_preamp(-3.5).unwrap();
+    s.set_bass(7.5).unwrap();
+    s.set_treble(-4.0).unwrap();
+    s.set_balance(0.35).unwrap();
     s.limiter_enabled = false;
     s.bypass = true;
     s.mode = EqMode::Parametric;
@@ -200,4 +203,62 @@ fn saving_over_an_existing_file_replaces_it() {
     persist::save(&p, &new).unwrap();
     assert!(state_eq(&persist::load(&p).unwrap(), &new));
     cleanup(&p);
+}
+
+/// A v0.1-era state file: every key it ever wrote, none of the tone/balance keys.
+const V01_FIXTURE: &str = r#"{"version":1,"mode":"Parametric","preamp_db":-3.5,
+"limiter_enabled":false,"bypass":false,"frame_duration_ms":85.3}"#;
+
+#[test]
+fn v01_file_loads_with_zero_tone_and_balance() {
+    let s = persist::parse(V01_FIXTURE.as_bytes()).unwrap();
+    assert_eq!((s.bass_db, s.treble_db, s.balance), (0.0, 0.0, 0.0));
+    assert_eq!(s.preamp_db, -3.5);
+    let mut twin = Inner::default();
+    twin.mode = EqMode::Parametric;
+    twin.set_preamp(-3.5).unwrap();
+    twin.limiter_enabled = false;
+    let a = s.engine_params(48000, 85.3).unwrap();
+    let b = twin.engine_params(48000, 85.3).unwrap();
+    assert_eq!(a.gains_db, b.gains_db);
+    assert_eq!(a.input_gain_left_db, b.input_gain_left_db);
+    assert_eq!(a.input_gain_right_db, b.input_gain_right_db);
+}
+
+#[test]
+fn new_keys_are_defaulted_not_required() {
+    // Tracks the schema: if a key is added without serde(default), an old file breaks.
+    let mut v = serde_json::to_value(PersistedState::from_inner(&heavy())).unwrap();
+    let o = v.as_object_mut().unwrap();
+    for k in ["bass_db", "treble_db", "balance"] {
+        assert!(o.remove(k).is_some(), "{k}");
+    }
+    let s = persist::parse(&serde_json::to_vec(&v).unwrap()).unwrap();
+    assert_eq!((s.bass_db, s.treble_db, s.balance), (0.0, 0.0, 0.0));
+}
+
+#[test]
+fn tone_and_balance_round_trip_values() {
+    let p = tmp_path("tone");
+    persist::save(&p, &heavy()).unwrap();
+    let back = persist::load(&p).unwrap();
+    assert_eq!((back.bass_db, back.treble_db, back.balance), (7.5, -4.0, 0.35));
+    cleanup(&p);
+}
+
+#[test]
+fn tone_and_balance_clamp_and_non_finite() {
+    let s = persist::parse(br#"{"version":1,"bass_db":99.0,"treble_db":-99.0,"balance":-5}"#).unwrap();
+    assert_eq!((s.bass_db, s.treble_db, s.balance), (12.0, -12.0, -1.0));
+    let s = persist::parse(br#"{"version":1,"balance":0.005}"#).unwrap();
+    assert_eq!(s.balance, 0.0);
+    for bad in [
+        r#"{"version":1,"bass_db":1e999}"#,
+        r#"{"version":1,"treble_db":-1e999}"#,
+        r#"{"version":1,"balance":null}"#,
+        r#"{"version":1,"balance":"x"}"#,
+    ] {
+        assert!(matches!(persist::parse(bad.as_bytes()), Err(EqError::Corrupt)), "{bad}");
+    }
+    assert_eq!(persist::SCHEMA_VERSION, 1);
 }
