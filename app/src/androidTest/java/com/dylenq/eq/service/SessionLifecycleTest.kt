@@ -90,7 +90,8 @@ class SessionLifecycleTest {
                     assertEquals("gain band $i", expected.gainsDb[i], h.readBandGain(i), 0.01f)
                     assertEquals("cutoff band $i", expected.cutoffsHz[i], h.readBandCutoff(i), 0.5f)
                 }
-                assertEquals(expected.inputGainDb, h.readInputGain(), 0.01f)
+                assertEquals(expected.inputGainLeftDb, h.readInputGain(CH_LEFT), 0.01f)
+                assertEquals(expected.inputGainRightDb, h.readInputGain(CH_RIGHT), 0.01f)
                 assertEquals(expected.limiter.thresholdDb, h.readLimiterThresholdDb(), 0.01f)
                 assertEquals(expected.limiterEnabled, h.readLimiterEnabled())
                 assertTrue(h.readEnabled())

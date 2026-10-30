@@ -75,7 +75,8 @@ class TracerTest {
                     assertEquals("gain band $i", expected.gainsDb[i], h.readBandGain(i), 0.01f)
                     assertEquals("cutoff band $i", expected.cutoffsHz[i], h.readBandCutoff(i), 0.5f)
                 }
-                assertEquals("input gain", expected.inputGainDb, h.readInputGain(), 0.01f)
+                assertEquals("input gain L", expected.inputGainLeftDb, h.readInputGain(CH_LEFT), 0.01f)
+                assertEquals("input gain R", expected.inputGainRightDb, h.readInputGain(CH_RIGHT), 0.01f)
                 assertTrue("enabled", h.readEnabled())
             }
 

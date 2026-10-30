@@ -111,13 +111,78 @@ class EffectManagerTest {
         assertTrue(mutators(1).isEmpty())
     }
 
+    private fun gainCalls() = fake.calls().filter { it.session == 1 && it.method == "setInputGain" }
+        .map { it.args[0] as Int }
+
     @Test
-    fun preamp_only_change_sends_one_input_gain_and_no_bands() {
+    fun preamp_only_change_sends_two_input_gains_and_no_bands() {
         mgr.onOpen(1, "com.a.b")
-        current = base.copy(inputGainDb = base.inputGainDb - 3f)
+        current = base.copy(
+            inputGainLeftDb = base.inputGainLeftDb - 3f,
+            inputGainRightDb = base.inputGainRightDb - 3f,
+        )
+        mgr.applyLatest()
+        assertEquals(listOf("setInputGain", "setInputGain"), mutators(1))
+        assertEquals(listOf(CH_LEFT, CH_RIGHT), gainCalls())
+        assertEquals(current.inputGainLeftDb, fake.handle(1)!!.readInputGain(CH_LEFT), 0f)
+        assertEquals(current.inputGainRightDb, fake.handle(1)!!.readInputGain(CH_RIGHT), 0f)
+    }
+
+    @Test
+    fun left_only_gain_change_sends_one_call_for_channel_zero() {
+        mgr.onOpen(1, "com.a.b")
+        current = base.copy(inputGainLeftDb = base.inputGainLeftDb - 6f)
         mgr.applyLatest()
         assertEquals(listOf("setInputGain"), mutators(1))
-        assertEquals(current.inputGainDb, fake.handle(1)!!.readInputGain(), 0f)
+        assertEquals(listOf(CH_LEFT), gainCalls())
+        assertEquals(base.inputGainRightDb, fake.handle(1)!!.readInputGain(CH_RIGHT), 0f)
+    }
+
+    @Test
+    fun setInputGain_carries_channel_then_db() {
+        mgr.onOpen(1, "com.a.b")
+        current = base.copy(inputGainRightDb = -12f)
+        mgr.applyLatest()
+        val c = fake.calls().last { it.method == "setInputGain" }
+        assertEquals(CH_RIGHT, c.args[0])
+        assertEquals(-12f, c.args[1] as Float, 0f)
+        assertEquals(1, fake.callCount(1, "setInputGain"))
+        assertEquals(0, fake.callCount(1, "setBand"))
+    }
+
+    @Test
+    fun right_only_gain_change_sends_one_call_for_channel_one() {
+        mgr.onOpen(1, "com.a.b")
+        current = base.copy(inputGainRightDb = base.inputGainRightDb - 6f)
+        mgr.applyLatest()
+        assertEquals(listOf("setInputGain"), mutators(1))
+        assertEquals(listOf(CH_RIGHT), gainCalls())
+    }
+
+    @Test
+    fun gain_change_under_epsilon_on_either_channel_sends_nothing() {
+        mgr.onOpen(1, "com.a.b")
+        current = base.copy(
+            inputGainLeftDb = base.inputGainLeftDb - 0.005f,
+            inputGainRightDb = base.inputGainRightDb + 0.005f,
+        )
+        mgr.applyLatest()
+        assertTrue(mutators(1).isEmpty())
+    }
+
+    @Test
+    fun bypassed_gain_changes_accumulate_per_channel_and_push_on_unbypass() {
+        mgr.onOpen(1, "com.a.b")
+        current = base.copy(bypass = true)
+        mgr.applyLatest()
+        current = base.copy(bypass = true, inputGainLeftDb = base.inputGainLeftDb - 9f)
+        mgr.applyLatest()
+        assertEquals("no pushes while bypassed", listOf("setEnabled"), mutators(1))
+        current = current.copy(bypass = false)
+        mgr.applyLatest()
+        assertEquals(listOf("setEnabled", "setInputGain", "setEnabled"), mutators(1))
+        assertEquals(listOf(CH_LEFT), gainCalls())
+        assertEquals(current.inputGainLeftDb, fake.handle(1)!!.readInputGain(CH_LEFT), 0f)
     }
 
     @Test

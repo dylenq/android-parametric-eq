@@ -8,7 +8,6 @@ interface EffectHandle {
     fun setBand(index: Int, cutoffHz: Float, gainDb: Float)
     /** Per-channel input gain; [CH_LEFT] / [CH_RIGHT]. */
     fun setInputGain(channel: Int, db: Float)
-    fun setInputGain(db: Float) { setInputGain(CH_LEFT, db); setInputGain(CH_RIGHT, db) }
     fun setLimiter(params: EngineParams)
     /** True when the platform accepted the change. */
     fun setEnabled(on: Boolean): Boolean
@@ -18,7 +17,6 @@ interface EffectHandle {
     fun readBandGain(i: Int): Float
     fun readBandCutoff(i: Int): Float
     fun readInputGain(channel: Int): Float
-    fun readInputGain(): Float = readInputGain(CH_LEFT)
     fun readEnabled(): Boolean
     fun readLimiterThresholdDb(): Float
     fun readLimiterEnabled(): Boolean
