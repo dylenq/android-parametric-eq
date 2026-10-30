@@ -62,6 +62,16 @@ class EqRuntime(
     // Worker only after construction: the probe runs at most once per process.
     private var probed = false
 
+    /** Debug/test override of the engine band cap. Never persisted, never a measurement. */
+    @Volatile private var forcedCap: Int? = null
+
+    /** The cap the core currently applies (forced value, else the measured one), or null when uncapped. */
+    val activeEngineBandCap: Int?
+        get() = forcedCap ?: measuredCap()
+
+    private fun measuredCap(): Int? =
+        settings.engineMaxBands?.takeIf { settings.engineProbeFingerprint == Build.FINGERPRINT }
+
     init {
         // A cached cap for this OS build applies before any UI curve is computed.
         val cached = settings.engineMaxBands
@@ -176,6 +186,17 @@ class EqRuntime(
         events.trySend(Command.Session(event))
     }
 
+    /**
+     * Test hook: force the engine band cap to [n] (coerced into 8..512). Null clears the override and
+     * restores the measured cap (uncapped when none). Never written to settings; the worker re-applies.
+     */
+    fun overrideEngineBandCap(n: Int?) {
+        forcedCap = n?.coerceIn(8, 512)
+        val target = forcedCap ?: measuredCap()
+        core.setEngineBandCap(target?.toUInt())
+        markDirty()
+    }
+
     /** Cheap, any thread: ask the worker to push the current EQ to every session. */
     fun markDirty() {
         if (closed) return
@@ -288,7 +309,7 @@ class EqRuntime(
         try {
             val n = minOf(p.measureMaxBands(EngineProbe.PROBE_BANDS), EngineProbe.PROBE_BANDS)
             settings.recordEngineProbe(n, Build.FINGERPRINT)
-            core.setEngineBandCap(n.toUInt())
+            if (forcedCap == null) core.setEngineBandCap(n.toUInt())
             Log.i("EQ-SVC", "engine probe: $n bands accepted")
             publishStatus()
         } catch (t: Throwable) {
