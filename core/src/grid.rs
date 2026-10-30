@@ -314,4 +314,112 @@ mod tests {
         assert!(matches!(Grid::hybrid(48000, f32::NAN), Err(GridError::FrameMs(_))));
         assert!(Grid::hybrid(192_000, 300.0).is_ok());
     }
+    const CAPS: [usize; 6] = [300, 128, 64, 32, 16, 8];
+
+    fn capped_grids() -> Vec<(usize, Grid)> {
+        let mut v = Vec::new();
+        for sr in [44100u32, 48000] {
+            for ms in [42.6f32, 85.3, 170.6] {
+                for cap in CAPS {
+                    v.push((cap, Grid::hybrid_capped(sr, ms, Some(cap)).unwrap()));
+                }
+            }
+        }
+        v
+    }
+
+    #[test]
+    fn capped_none_or_non_binding_is_bit_identical() {
+        for sr in [44100u32, 48000] {
+            for ms in [42.6f32, 85.3, 170.6] {
+                let full = Grid::hybrid(sr, ms).unwrap();
+                for cap in [None, Some(10_000), Some(full.band_count())] {
+                    let g = Grid::hybrid_capped(sr, ms, cap).unwrap();
+                    assert_eq!(g, full);
+                    assert_eq!(layout_id(&g), layout_id(&full));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn capped_count_within_cap() {
+        for (cap, g) in capped_grids() {
+            assert!(g.band_count() <= cap.max(MIN_ENGINE_BANDS), "cap {cap}: {}", g.band_count());
+            assert!(g.band_count() >= 1);
+        }
+    }
+
+    #[test]
+    fn capped_cutoffs_strictly_increasing() {
+        for (cap, g) in capped_grids() {
+            assert!(g.cutoffs_hz.windows(2).all(|w| w[0] < w[1]), "cap {cap} {} {}", g.sr, g.block);
+        }
+    }
+
+    #[test]
+    fn capped_last_cutoff_is_nyquist() {
+        for (cap, g) in capped_grids() {
+            assert_eq!(*g.cutoffs_hz.last().unwrap(), g.sr as f32 / 2.0, "cap {cap}");
+            assert_eq!(g.ranges.last().unwrap().1, g.half(), "cap {cap}");
+        }
+    }
+
+    #[test]
+    fn capped_ranges_cover_bins_without_gaps() {
+        for (cap, g) in capped_grids() {
+            assert_eq!(g.ranges[0].0, 0, "cap {cap}");
+            for w in g.ranges.windows(2) {
+                assert_eq!(w[1].0, w[0].1 + 1, "cap {cap}");
+                assert!(w[0].0 <= w[0].1);
+            }
+        }
+    }
+
+    #[test]
+    fn capped_bin_stop_round_trip() {
+        for (cap, g) in capped_grids() {
+            for (i, &c) in g.cutoffs_hz.iter().enumerate() {
+                assert_eq!(bin_stop(c as f64, g.block, g.sr), g.ranges[i].1 as i64, "cap {cap}");
+            }
+        }
+    }
+
+    #[test]
+    fn capped_layout_id_changes_when_cap_binds() {
+        let full = Grid::hybrid(48000, 85.3).unwrap();
+        for cap in [128usize, 64, 32, 16, 8] {
+            let g = Grid::hybrid_capped(48000, 85.3, Some(cap)).unwrap();
+            assert_ne!(layout_id(&g), layout_id(&full), "cap {cap}");
+        }
+    }
+
+    #[test]
+    fn capped_layout_id_is_deterministic() {
+        let a = Grid::hybrid_capped(48000, 85.3, Some(64)).unwrap();
+        let b = Grid::hybrid_capped(48000, 85.3, Some(64)).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(layout_id(&a), layout_id(&b));
+    }
+
+    #[test]
+    fn cap_below_minimum_is_raised() {
+        for cap in [0usize, 1, 3, 7] {
+            let g = Grid::hybrid_capped(48000, 85.3, Some(cap)).unwrap();
+            assert!(g.band_count() >= 1 && g.band_count() <= MIN_ENGINE_BANDS, "cap {cap}");
+            assert_eq!(*g.cutoffs_hz.last().unwrap(), 24000.0);
+        }
+    }
+
+    #[test]
+    fn probe_request_covers_every_grid() {
+        for sr in [44100u32, 48000, 96000] {
+            let mut ms = 5.0f32;
+            while ms <= 300.0 {
+                let n = Grid::hybrid(sr, ms).unwrap().band_count();
+                assert!(n <= PROBE_BANDS, "{sr} Hz {ms} ms: {n}");
+                ms += 5.0;
+            }
+        }
+    }
 }
