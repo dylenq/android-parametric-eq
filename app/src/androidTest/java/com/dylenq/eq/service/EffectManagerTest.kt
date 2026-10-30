@@ -22,6 +22,7 @@ class EffectManagerTest {
     private lateinit var fake: FakeEffectFactory
     private lateinit var mgr: EffectManager
     private var changes = 0
+    private val sleeps = ArrayList<Long>()
 
     @Before
     fun setUp() {
@@ -29,7 +30,8 @@ class EffectManagerTest {
         current = base
         fake = FakeEffectFactory()
         changes = 0
-        mgr = EffectManager(fake, { current }, { changes++ })
+        sleeps.clear()
+        mgr = EffectManager(fake, { current }, { changes++ }, sleeper = Sleeper { sleeps.add(it) })
     }
 
     private fun withGain(p: EngineParams, band: Int, delta: Float): EngineParams {
@@ -223,7 +225,7 @@ class EffectManagerTest {
 
     @Test
     fun a_throwable_from_the_factory_never_escapes() {
-        fake.failNextCreate(Error("boom"))
+        fake.failNextCreates(3, Error("boom"))
         mgr.onOpen(1, "com.a.b")
         assertEquals(0, mgr.sessionCount())
         assertEquals(SessionState.FAILED, mgr.sessionInfos().single().state)
@@ -242,12 +244,76 @@ class EffectManagerTest {
 
     @Test
     fun a_later_successful_open_clears_the_failed_entry() {
-        fake.failNextCreate(RuntimeException("once"))
+        fake.failNextCreates(3, RuntimeException("once"))
         mgr.onOpen(1, "com.a.b")
         assertEquals(SessionState.FAILED, mgr.sessionInfos().single().state)
         mgr.onOpen(1, "com.a.b")
         assertEquals(SessionState.OK, mgr.sessionInfos().single().state)
         assertEquals(1, mgr.sessionCount())
+    }
+
+    @Test
+    fun create_retries_transient_failure_and_session_is_ok() {
+        fake.failNextCreates(2, RuntimeException("transient"))
+        mgr.onOpen(1, "com.a.b")
+        assertEquals(SessionState.OK, mgr.sessionInfos().single().state)
+        assertEquals(3, fake.callCount(1, "create"))
+        assertEquals(listOf(50L, 100L), sleeps)
+    }
+
+    @Test
+    fun create_fails_after_three_attempts() {
+        val m = EffectManager(fake, { current }, {}, sleeper = Sleeper { sleeps.add(it) })
+        fake.failNextCreates(3, RuntimeException("permanent"))
+        m.onOpen(1, "com.a.b")
+        assertEquals(3, fake.callCount(1, "create"))
+        assertEquals(listOf(50L, 100L), sleeps)
+        assertEquals(SessionState.FAILED, m.sessionInfos().single().state)
+        assertEquals(0, m.sessionCount())
+    }
+
+    @Test
+    fun no_failed_state_is_observable_before_the_last_attempt() {
+        val seen = ArrayList<SessionState>()
+        lateinit var m: EffectManager
+        m = EffectManager(fake, { current }, {}, sleeper = Sleeper { _ ->
+            seen.addAll(m.sessionInfos().map { it.state })
+        })
+        fake.failNextCreates(2, RuntimeException("transient"))
+        m.onOpen(1, "com.a.b")
+        assertTrue("no session visible mid-retry: $seen", seen.isEmpty())
+        assertEquals(SessionState.OK, m.sessionInfos().single().state)
+    }
+
+    @Test
+    fun no_control_is_not_retried() {
+        fake.controlLost(1)
+        mgr.onOpen(1, "com.a.b")
+        assertEquals(SessionState.NO_CONTROL, mgr.sessionInfos().single().state)
+        assertEquals(1, fake.callCount(1, "create"))
+        assertTrue(sleeps.isEmpty())
+    }
+
+    @Test
+    fun recreate_uses_retry() {
+        mgr.onOpen(1, "com.a.b")
+        fake.failNextCreates(2, RuntimeException("transient"))
+        current = base.copy(sampleRate = 44100u)
+        mgr.applyLatest()
+        assertEquals(SessionState.OK, mgr.sessionInfos().single().state)
+        assertEquals(4, fake.callCount(1, "create"))
+        assertEquals(listOf(50L, 100L), sleeps)
+    }
+
+    @Test
+    fun global_mode_uses_retry() {
+        var rejected: String? = null
+        val m = EffectManager(fake, { current }, {}, onGlobalRejected = { rejected = it }, sleeper = Sleeper { sleeps.add(it) })
+        fake.failNextCreates(1, RuntimeException("transient"))
+        m.setGlobalMode(true)
+        assertTrue("rejected: $rejected", m.isGlobalOn())
+        assertEquals(2, fake.callCount(EffectManager.GLOBAL_ID, "create"))
+        assertEquals(listOf(50L), sleeps)
     }
 
     @Test
