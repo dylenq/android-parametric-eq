@@ -51,6 +51,7 @@ fn heavy() -> Inner {
     s.bypass = true;
     s.mode = EqMode::Parametric;
     s.set_frame_duration_ms(170.6).unwrap();
+    s.save_preset("Heavy night").unwrap();
     s
 }
 
@@ -261,4 +262,178 @@ fn tone_and_balance_clamp_and_non_finite() {
         assert!(matches!(persist::parse(bad.as_bytes()), Err(EqError::Corrupt)), "{bad}");
     }
     assert_eq!(persist::SCHEMA_VERSION, 1);
+}
+
+// ---- Phase 9: presets ----
+
+fn preset_json(name: &str, extra: &str) -> String {
+    let gains = vec!["0.0"; 10].join(",");
+    let bands = serde_json::to_string(&Inner::default().parametric).unwrap();
+    format!(
+        r#"{{"name":{name},"curve":{{"mode":"Graphic","bands":{bands},"graphic_band_count":10,"graphic_gains_db":[{gains}],"preamp_db":0.0,"bass_db":0.0,"treble_db":0.0,"balance":0.0{extra}}}}}"#,
+        name = serde_json::to_string(name).unwrap(),
+    )
+}
+
+fn load_json(tag: &str, json: &str) -> Result<Inner, EqError> {
+    let p = tmp_path(tag);
+    write(&p, json.as_bytes());
+    let r = persist::load(&p);
+    cleanup(&p);
+    r
+}
+
+fn names(s: &Inner) -> Vec<String> {
+    s.presets.iter().map(|p| p.name.clone()).collect()
+}
+
+#[test]
+fn presets_old_and_phase8_files_load_with_none() {
+    let a = load_json("p0", r#"{"version":1}"#).unwrap();
+    assert!(a.presets.is_empty() && a.active_preset.is_none());
+    let b = load_json("p8", r#"{"version":1,"mode":"Parametric","bass_db":2.0,"balance":0.3}"#).unwrap();
+    assert!(b.presets.is_empty() && b.active_preset.is_none());
+    assert_eq!(persist::SCHEMA_VERSION, 1);
+}
+
+#[test]
+fn presets_round_trip_parametric_preset_with_tone_and_balance() {
+    let mut s = Inner::default();
+    s.mode = EqMode::Parametric;
+    s.set_bass(5.0).unwrap();
+    s.set_balance(-0.4).unwrap();
+    s.set_preamp(-2.0).unwrap();
+    s.save_preset("Para").unwrap();
+    let p = tmp_path("pr");
+    persist::save(&p, &s).unwrap();
+    let back = persist::load(&p).unwrap();
+    cleanup(&p);
+    assert!(state_eq(&s, &back));
+    assert_eq!(back.active_preset.as_deref(), Some("user:Para"));
+    assert!(!back.is_modified());
+    let c = &back.presets[0].curve;
+    assert_eq!((c.mode, c.bass_db, c.balance), (EqMode::Parametric, 5.0, -0.4));
+    assert!(back.presets.len() == 1);
+}
+
+#[test]
+fn presets_bad_ones_are_dropped_individually() {
+    let long = "x".repeat(41);
+    let good = |n: &str| preset_json(n, "");
+    let bad_count = preset_json("BadCount", "").replace("\"graphic_band_count\":10", "\"graphic_band_count\":7");
+    let bad_len = preset_json("BadLen", "").replace("\"graphic_gains_db\":[0.0,", "\"graphic_gains_db\":[");
+    let bad_mode = preset_json("BadMode", "").replace("\"Graphic\"", "\"Wat\"");
+    let list = vec![
+        good("Keep1"),
+        good(""),
+        good(&long),
+        good("ctl\u{7}x"),
+        good("FLAT"),
+        good("Keep1"),
+        good("keep1"),
+        bad_count,
+        bad_len,
+        bad_mode,
+        "42".to_string(),
+        good("Keep2"),
+    ];
+    let json = format!(r#"{{"version":1,"presets":[{}],"active_preset":"user:Keep2"}}"#, list.join(","));
+    let s = load_json("pbad", &json).unwrap();
+    assert_eq!(names(&s), ["Keep1", "Keep2"]);
+    assert_eq!(s.active_preset.as_deref(), Some("user:Keep2"));
+}
+
+#[test]
+fn presets_wrong_shape_never_corrupts_the_file() {
+    for extra in [r#""presets":"nope""#, r#""presets":{"a":1}"#, r#""presets":null"#, r#""active_preset":5"#] {
+        let json = format!(r#"{{"version":1,"preamp_db":-2.0,{extra}}}"#);
+        let s = load_json("pshape", &json).unwrap();
+        assert!(s.presets.is_empty());
+        assert_eq!(s.preamp_db, -2.0);
+    }
+}
+
+#[test]
+fn presets_out_of_range_values_are_clamped_on_load() {
+    let json = format!(
+        r#"{{"version":1,"presets":[{}]}}"#,
+        preset_json("Loud", "").replace("\"preamp_db\":0.0", "\"preamp_db\":99.0").replace("\"bass_db\":0.0", "\"bass_db\":50.0")
+    );
+    let s = load_json("pclamp", &json).unwrap();
+    assert_eq!((s.presets[0].curve.preamp_db, s.presets[0].curve.bass_db), (24.0, 12.0));
+}
+
+#[test]
+fn presets_non_finite_floats_drop_that_preset() {
+    use eq_core::persist::sanitize;
+    let mut st = PersistedState::from_inner(&Inner::default());
+    let mut a = Inner::default();
+    a.save_preset("Good").unwrap();
+    let mut b = Inner::default();
+    b.save_preset("Nan").unwrap();
+    b.presets[0].curve.graphic_gains_db[0] = f32::NAN;
+    let mut c = Inner::default();
+    c.save_preset("Inf").unwrap();
+    c.presets[0].curve.preamp_db = f32::INFINITY;
+    st.presets = vec![a.presets[0].clone(), b.presets[0].clone(), c.presets[0].clone()];
+    let out = sanitize(st).unwrap();
+    assert_eq!(out.presets.len(), 1);
+    assert_eq!(out.presets[0].name, "Good");
+}
+
+#[test]
+fn presets_more_than_a_hundred_truncate() {
+    let list: Vec<String> = (0..130).map(|i| preset_json(&format!("p{i}"), "")).collect();
+    let json = format!(r#"{{"version":1,"presets":[{}]}}"#, list.join(","));
+    let s = load_json("pmany", &json).unwrap();
+    assert_eq!(s.presets.len(), 100);
+    assert_eq!(s.presets[99].name, "p99");
+}
+
+#[test]
+fn presets_dangling_active_key_loads_as_none() {
+    let one = preset_json("Here", "");
+    for (key, expect) in [
+        ("user:Here", Some("user:Here")),
+        ("builtin:Bass", Some("builtin:Bass")),
+        ("user:Missing", None),
+        ("builtin:Nope", None),
+        ("weird:Here", None),
+        ("Here", None),
+    ] {
+        let json = format!(r#"{{"version":1,"presets":[{one}],"active_preset":"{key}"}}"#);
+        let s = load_json("pact", &json).unwrap();
+        assert_eq!(s.active_preset.as_deref(), expect, "{key}");
+    }
+}
+
+#[test]
+fn presets_hundred_worst_case_fit_under_half_the_file_cap() {
+    let mut s = Inner::default();
+    s.parametric.clear();
+    for i in 0..16 {
+        let mut b = Band::new(FilterKind::ALL[i % 5], 37.123_457 * (i as f32 + 1.0) * 3.3);
+        b.gain_db = -23.456_78 + i as f32;
+        b.q = 0.123_456_79 + i as f32;
+        s.parametric.push(b);
+    }
+    s.set_graphic_band_count(31).unwrap();
+    for i in 0..31 {
+        s.set_graphic_gain(i, -23.456_78 + i as f32 * 0.123_456_79).unwrap();
+    }
+    s.set_preamp(-17.654_322).unwrap();
+    s.set_bass(-11.234_567).unwrap();
+    s.set_treble(10.987_654).unwrap();
+    s.set_balance(0.333_333_34).unwrap();
+    for i in 0..100 {
+        s.save_preset(&format!("{i:03}-{}", "n".repeat(36))).unwrap();
+    }
+    let p = tmp_path("psize");
+    persist::save(&p, &s).unwrap();
+    let len = std::fs::metadata(&p).unwrap().len();
+    assert!(len < persist::MAX_FILE_BYTES / 2, "{len} bytes");
+    let back = persist::load(&p).unwrap();
+    cleanup(&p);
+    assert_eq!(back.presets.len(), 100);
+    assert!(state_eq(&s, &back));
 }

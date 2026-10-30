@@ -657,3 +657,26 @@ fn tone_and_balance_do_not_clear_bypass_flag() {
     let e = core.engine_params(48000, 85.3).unwrap();
     assert!(e.bypass);
 }
+
+#[test]
+fn presets_survive_save_and_load_through_eqcore() {
+    let c = EqCore::new();
+    c.set_mode(EqMode::Parametric);
+    c.set_treble(3.0).unwrap();
+    c.save_preset("Round".into()).unwrap();
+    c.set_preamp(-1.0).unwrap(); // now modified
+    let path = std::env::temp_dir()
+        .join(format!("eqcore-presets-{}.json", std::process::id()))
+        .to_string_lossy()
+        .into_owned();
+    c.save(path.clone()).unwrap();
+    let back = EqCore::load(path.clone()).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let (a, b) = (c.snapshot(), back.snapshot());
+    assert_eq!(b.presets, a.presets);
+    assert_eq!(b.presets.len(), 5);
+    assert_eq!(b.active_preset_key.as_deref(), Some("user:Round"));
+    assert_eq!(b.active_preset_name.as_deref(), Some("Round"));
+    assert!(b.preset_modified);
+    assert_eq!(b.mode, EqMode::Parametric);
+}

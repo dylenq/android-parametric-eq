@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::EqError;
 use crate::inner::{DEFAULT_FRAME_MS, Inner, MAX_FRAME_MS, MIN_FRAME_MS, TONE_MAX_DB};
+use crate::presets::{self, Preset};
 use crate::model::{
     Band, EqMode, EqState, GRAPHIC_COUNTS, GRAPHIC_MAX_DB, GraphicState, MAX_BANDS, MAX_GAIN_DB,
 };
@@ -58,6 +59,10 @@ pub struct PersistedState {
     pub bypass: bool,
     #[serde(default = "default_frame")]
     pub frame_duration_ms: f32,
+    #[serde(default)]
+    pub presets: Vec<Preset>,
+    #[serde(default)]
+    pub active_preset: Option<String>,
 }
 
 impl PersistedState {
@@ -74,6 +79,8 @@ impl PersistedState {
             limiter_enabled: s.limiter_enabled,
             bypass: s.bypass,
             frame_duration_ms: s.frame_duration_ms,
+            presets: s.presets.clone(),
+            active_preset: s.active_preset.clone(),
         }
     }
 
@@ -89,6 +96,8 @@ impl PersistedState {
             limiter_enabled: self.limiter_enabled,
             bypass: self.bypass,
             frame_duration_ms: self.frame_duration_ms,
+            presets: self.presets,
+            active_preset: self.active_preset,
             ..Inner::default()
         }
     }
@@ -132,6 +141,15 @@ pub fn sanitize(mut p: PersistedState) -> Result<PersistedState, EqError> {
     {
         p.frame_duration_ms = DEFAULT_FRAME_MS;
     }
+    // Preset damage never fails the load: bad presets are dropped one by one.
+    p.presets = presets::sanitize_user_presets(std::mem::take(&mut p.presets));
+    let resolves = p
+        .active_preset
+        .as_deref()
+        .is_some_and(|k| presets::find_in(&p.presets, k).is_some());
+    if !resolves {
+        p.active_preset = None;
+    }
     Ok(p)
 }
 
@@ -148,7 +166,21 @@ pub fn parse(bytes: &[u8]) -> Result<Inner, EqError> {
     if version == 0 {
         return Err(EqError::Corrupt);
     }
-    let state: PersistedState = serde_json::from_value(value).map_err(|_| EqError::Corrupt)?;
+    // Presets are read apart from the rest so a damaged one costs only itself, never the file.
+    let mut value = value;
+    let (raw_presets, raw_active) = match value.as_object_mut() {
+        Some(o) => (o.remove("presets"), o.remove("active_preset")),
+        None => (None, None),
+    };
+    let mut state: PersistedState = serde_json::from_value(value).map_err(|_| EqError::Corrupt)?;
+    state.presets = match raw_presets {
+        Some(serde_json::Value::Array(items)) => items
+            .into_iter()
+            .filter_map(|v| serde_json::from_value::<Preset>(v).ok())
+            .collect(),
+        _ => Vec::new(),
+    };
+    state.active_preset = raw_active.and_then(|v| v.as_str().map(String::from));
     Ok(sanitize(state)?.into_inner())
 }
 
