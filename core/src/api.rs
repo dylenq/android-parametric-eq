@@ -17,6 +17,9 @@ pub struct Snapshot {
     pub graphic_gains_db: Vec<f32>,
     pub graphic_centres_hz: Vec<f32>,
     pub preamp_db: f32,
+    pub bass_db: f32,
+    pub treble_db: f32,
+    pub balance: f32,
     pub limiter_enabled: bool,
     pub bypass: bool,
     pub frame_duration_ms: f32,
@@ -39,6 +42,8 @@ pub struct EngineParams {
     pub cutoffs_hz: Vec<f32>,
     pub gains_db: Vec<f32>,
     pub input_gain_db: f32,
+    pub input_gain_left_db: f32,
+    pub input_gain_right_db: f32,
     /// Verified on the emulator, see `headroom::LIMITER_VERIFIED`.
     pub limiter: LimiterParams,
     pub limiter_enabled: bool,
@@ -98,6 +103,9 @@ impl EqCore {
             graphic_gains_db: s.graphic.gains_db.clone(),
             graphic_centres_hz: s.graphic_centres(),
             preamp_db: s.preamp_db,
+            bass_db: s.bass_db,
+            treble_db: s.treble_db,
+            balance: s.balance,
             limiter_enabled: s.limiter_enabled,
             bypass: s.bypass,
             frame_duration_ms: s.frame_duration_ms,
@@ -132,6 +140,18 @@ impl EqCore {
 
     pub fn set_preamp(&self, db: f32) -> Result<(), EqError> {
         self.lock().set_preamp(db)
+    }
+
+    pub fn set_bass(&self, db: f32) -> Result<(), EqError> {
+        self.lock().set_bass(db)
+    }
+
+    pub fn set_treble(&self, db: f32) -> Result<(), EqError> {
+        self.lock().set_treble(db)
+    }
+
+    pub fn set_balance(&self, balance: f32) -> Result<(), EqError> {
+        self.lock().set_balance(balance)
     }
 
     pub fn set_limiter_enabled(&self, on: bool) {
@@ -199,6 +219,8 @@ impl EqCore {
             cutoffs_hz: e.cutoffs_hz,
             gains_db: e.gains_db,
             input_gain_db: e.input_gain_db,
+            input_gain_left_db: e.input_gain_left_db,
+            input_gain_right_db: e.input_gain_right_db,
             limiter: e.limiter,
             limiter_enabled: e.limiter_enabled,
             bypass: e.bypass,

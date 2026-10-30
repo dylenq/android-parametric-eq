@@ -3,6 +3,7 @@
 
 use crate::achieved::BinGains;
 use crate::error::EqError;
+use crate::dsp::biquad::Coeffs;
 use crate::fit;
 use crate::graphic;
 use crate::grid::{self, Grid};
@@ -15,12 +16,24 @@ pub const MIN_FRAME_MS: f32 = 5.0;
 pub const MAX_FRAME_MS: f32 = 300.0;
 pub const MIN_CURVE_POINTS: u32 = 2;
 pub const MAX_CURVE_POINTS: u32 = 2048;
+pub const TONE_BASS_HZ: f64 = 100.0;
+pub const TONE_TREBLE_HZ: f64 = 10_000.0;
+pub const TONE_Q: f64 = 0.707;
+pub const TONE_MAX_DB: f32 = 12.0;
+/// Lowest per-channel input gain the core hands to the engine.
+pub const MIN_CHANNEL_GAIN_DB: f32 = -60.0;
+/// Balance magnitudes at or below this snap to centre.
+const BALANCE_SNAP: f32 = 0.01;
 
 pub struct Inner {
     pub mode: EqMode,
     pub parametric: Vec<Band>,
     pub graphic: GraphicState,
     pub preamp_db: f32,
+    pub bass_db: f32,
+    pub treble_db: f32,
+    /// -1.0 (full left) .. 1.0 (full right); > 0 attenuates the left channel.
+    pub balance: f32,
     pub limiter_enabled: bool,
     pub bypass: bool,
     pub frame_duration_ms: f32,
@@ -36,6 +49,9 @@ impl Default for Inner {
             parametric: EqState::default().bands,
             graphic: GraphicState::default(),
             preamp_db: 0.0,
+            bass_db: 0.0,
+            treble_db: 0.0,
+            balance: 0.0,
             limiter_enabled: true,
             bypass: false,
             frame_duration_ms: DEFAULT_FRAME_MS,
@@ -60,6 +76,8 @@ pub struct Engine {
     pub cutoffs_hz: Vec<f32>,
     pub gains_db: Vec<f32>,
     pub input_gain_db: f32,
+    pub input_gain_left_db: f32,
+    pub input_gain_right_db: f32,
     pub limiter: LimiterParams,
     pub limiter_enabled: bool,
     pub bypass: bool,
@@ -80,6 +98,9 @@ impl Inner {
             band_count: self.graphic.band_count,
             gains_db: self.graphic.gains_db.clone(),
             preamp_db: self.preamp_db,
+            bass_db: self.bass_db,
+            treble_db: self.treble_db,
+            balance: self.balance,
         }
     }
 
@@ -87,6 +108,9 @@ impl Inner {
         self.parametric = s.bands;
         self.graphic = GraphicState { band_count: s.band_count, gains_db: s.gains_db };
         self.preamp_db = s.preamp_db;
+        self.bass_db = s.bass_db;
+        self.treble_db = s.treble_db;
+        self.balance = s.balance;
     }
 
     /// Runs a validated mutation and records it. `f` must not mutate when it returns Err.
@@ -164,6 +188,36 @@ impl Inner {
         })
     }
 
+    pub fn set_bass(&mut self, db: f32) -> Result<(), EqError> {
+        if !db.is_finite() {
+            return Err(EqError::InvalidValue);
+        }
+        self.edit(|s| {
+            s.bass_db = db.clamp(-TONE_MAX_DB, TONE_MAX_DB);
+            Ok(())
+        })
+    }
+
+    pub fn set_treble(&mut self, db: f32) -> Result<(), EqError> {
+        if !db.is_finite() {
+            return Err(EqError::InvalidValue);
+        }
+        self.edit(|s| {
+            s.treble_db = db.clamp(-TONE_MAX_DB, TONE_MAX_DB);
+            Ok(())
+        })
+    }
+
+    pub fn set_balance(&mut self, v: f32) -> Result<(), EqError> {
+        if !v.is_finite() {
+            return Err(EqError::InvalidValue);
+        }
+        self.edit(|s| {
+            s.balance = snap_balance(v);
+            Ok(())
+        })
+    }
+
     pub fn set_frame_duration_ms(&mut self, ms: f32) -> Result<(), EqError> {
         if !ms.is_finite() || !(MIN_FRAME_MS..=MAX_FRAME_MS).contains(&ms) {
             return Err(EqError::InvalidValue);
@@ -222,7 +276,7 @@ impl Inner {
     }
 
     /// The ideal curve (dB) for the active mode as a function of frequency.
-    fn target<'a>(&'a self, sample_rate: f64) -> Box<dyn Fn(f64) -> f64 + 'a> {
+    fn base_target<'a>(&'a self, sample_rate: f64) -> Box<dyn Fn(f64) -> f64 + 'a> {
         match self.mode {
             EqMode::Parametric => {
                 Box::new(fit::parametric_target(&self.eq_state_for_curve(), sample_rate))
@@ -234,6 +288,31 @@ impl Inner {
                 }
             }
         }
+    }
+
+    /// The ideal curve including the tone shelves. Each shelf is skipped when its gain is
+    /// exactly 0, so zero tone returns the base closure untouched.
+    fn target<'a>(&'a self, sample_rate: f64) -> Box<dyn Fn(f64) -> f64 + 'a> {
+        let base = self.base_target(sample_rate);
+        if self.bass_db == 0.0 && self.treble_db == 0.0 {
+            return base;
+        }
+        let low = (self.bass_db != 0.0).then(|| {
+            Coeffs::design(FilterKind::LowShelf, TONE_BASS_HZ, self.bass_db as f64, TONE_Q, sample_rate)
+        });
+        let high = (self.treble_db != 0.0).then(|| {
+            Coeffs::design(FilterKind::HighShelf, TONE_TREBLE_HZ, self.treble_db as f64, TONE_Q, sample_rate)
+        });
+        Box::new(move |f| {
+            let mut v = base(f);
+            if let Some(c) = &low {
+                v += c.magnitude_db(f, sample_rate);
+            }
+            if let Some(c) = &high {
+                v += c.magnitude_db(f, sample_rate);
+            }
+            v
+        })
     }
 
     fn grid_for(&self, sample_rate: u32, frame_ms: f32) -> Result<Grid, EqError> {
@@ -300,6 +379,16 @@ impl Inner {
         let gains = fit::fit(&grid, &target);
         let peak = headroom::peak_db(&grid, &gains);
         let preamp = self.preamp_db.clamp(-(MAX_GAIN_DB), MAX_GAIN_DB);
+        let att = balance_attenuation_db(self.balance);
+        let (att_l, att_r) = if self.balance > 0.0 {
+            (att, 0.0)
+        } else if self.balance < 0.0 {
+            (0.0, att)
+        } else {
+            (0.0, 0.0)
+        };
+        let left = (preamp + att_l).max(MIN_CHANNEL_GAIN_DB);
+        let right = (preamp + att_r).max(MIN_CHANNEL_GAIN_DB);
         Ok(Engine {
             sample_rate,
             frame_duration_ms: frame_ms,
@@ -307,6 +396,8 @@ impl Inner {
             cutoffs_hz: grid.cutoffs_hz.clone(),
             gains_db: gains.iter().map(|&g| g as f32).collect(),
             input_gain_db: preamp,
+            input_gain_left_db: left,
+            input_gain_right_db: right,
             limiter: LimiterParams::default(),
             limiter_enabled: self.limiter_enabled,
             bypass: self.bypass,
@@ -321,6 +412,24 @@ impl Inner {
     pub fn graphic_centres(&self) -> Vec<f32> {
         graphic::centres(self.graphic.band_count).map(|c| c.to_vec()).unwrap_or_default()
     }
+}
+
+/// Snaps near-centre balance to exactly 0 and clamps to -1..1.
+fn snap_balance(v: f32) -> f32 {
+    let c = v.clamp(-1.0, 1.0);
+    if c.abs() <= BALANCE_SNAP { 0.0 } else { c }
+}
+
+/// Attenuation (dB, <= 0) of the quieter channel: 20*log10(1 - |b|), floored at -60 dB.
+fn balance_attenuation_db(b: f32) -> f32 {
+    if b == 0.0 {
+        return 0.0;
+    }
+    let rem = 1.0 - (b.abs() as f64);
+    if rem <= 0.0 {
+        return MIN_CHANNEL_GAIN_DB;
+    }
+    ((20.0 * rem.log10()) as f32).max(MIN_CHANNEL_GAIN_DB)
 }
 
 /// Frequency of point `i` of `n` on the shared 20 Hz..20 kHz log grid.

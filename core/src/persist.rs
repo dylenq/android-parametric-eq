@@ -5,7 +5,7 @@ use std::io::Read;
 use serde::{Deserialize, Serialize};
 
 use crate::error::EqError;
-use crate::inner::{DEFAULT_FRAME_MS, Inner, MAX_FRAME_MS, MIN_FRAME_MS};
+use crate::inner::{DEFAULT_FRAME_MS, Inner, MAX_FRAME_MS, MIN_FRAME_MS, TONE_MAX_DB};
 use crate::model::{
     Band, EqMode, EqState, GRAPHIC_COUNTS, GRAPHIC_MAX_DB, GraphicState, MAX_BANDS, MAX_GAIN_DB,
 };
@@ -46,6 +46,12 @@ pub struct PersistedState {
     pub graphic: GraphicState,
     #[serde(default)]
     pub preamp_db: f32,
+    #[serde(default)]
+    pub bass_db: f32,
+    #[serde(default)]
+    pub treble_db: f32,
+    #[serde(default)]
+    pub balance: f32,
     #[serde(default = "yes")]
     pub limiter_enabled: bool,
     #[serde(default)]
@@ -62,6 +68,9 @@ impl PersistedState {
             parametric: PersistedParametric { bands: s.parametric.clone() },
             graphic: s.graphic.clone(),
             preamp_db: s.preamp_db,
+            bass_db: s.bass_db,
+            treble_db: s.treble_db,
+            balance: s.balance,
             limiter_enabled: s.limiter_enabled,
             bypass: s.bypass,
             frame_duration_ms: s.frame_duration_ms,
@@ -74,6 +83,9 @@ impl PersistedState {
             parametric: self.parametric.bands,
             graphic: self.graphic,
             preamp_db: self.preamp_db,
+            bass_db: self.bass_db,
+            treble_db: self.treble_db,
+            balance: self.balance,
             limiter_enabled: self.limiter_enabled,
             bypass: self.bypass,
             frame_duration_ms: self.frame_duration_ms,
@@ -106,6 +118,15 @@ pub fn sanitize(mut p: PersistedState) -> Result<PersistedState, EqError> {
         return Err(EqError::Corrupt);
     }
     p.preamp_db = p.preamp_db.clamp(-MAX_GAIN_DB, MAX_GAIN_DB);
+    if !(p.bass_db.is_finite() && p.treble_db.is_finite() && p.balance.is_finite()) {
+        return Err(EqError::Corrupt);
+    }
+    p.bass_db = p.bass_db.clamp(-TONE_MAX_DB, TONE_MAX_DB);
+    p.treble_db = p.treble_db.clamp(-TONE_MAX_DB, TONE_MAX_DB);
+    p.balance = p.balance.clamp(-1.0, 1.0);
+    if p.balance.abs() <= 0.01 {
+        p.balance = 0.0;
+    }
     if !p.frame_duration_ms.is_finite()
         || !(MIN_FRAME_MS..=MAX_FRAME_MS).contains(&p.frame_duration_ms)
     {

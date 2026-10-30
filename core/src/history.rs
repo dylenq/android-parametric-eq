@@ -6,7 +6,7 @@ use crate::model::Band;
 
 const LIMIT: usize = 100;
 
-/// What undo and redo record: parametric bands, graphic band count and gains, and preamp.
+/// What undo and redo record: parametric bands, graphic band count and gains, preamp, tone (bass, treble) and balance.
 /// Mode, bypass, the limiter flag and the frame duration are listening settings, not edits,
 /// so they are neither recorded nor restored.
 #[derive(Clone, Debug, PartialEq)]
@@ -15,6 +15,9 @@ pub struct EditSnapshot {
     pub band_count: u32,
     pub gains_db: Vec<f32>,
     pub preamp_db: f32,
+    pub bass_db: f32,
+    pub treble_db: f32,
+    pub balance: f32,
 }
 
 #[derive(Default)]
@@ -113,6 +116,9 @@ mod tests {
             band_count: 10,
             gains_db: vec![0.0; 10],
             preamp_db: preamp,
+            bass_db: 0.0,
+            treble_db: 0.0,
+            balance: 0.0,
         }
     }
 
