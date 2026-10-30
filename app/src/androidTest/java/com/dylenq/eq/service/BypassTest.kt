@@ -102,4 +102,39 @@ class BypassTest {
             ctx.stopService(Intent(ctx, EqService::class.java))
         }
     }
+
+    @Test
+    fun bassAndBalanceSilencedByBypass() {
+        val runtime = rt.runtime
+        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        var rig: ToneRig? = null
+        var vis: android.media.audiofx.Visualizer? = null
+        try {
+            assertTrue("service did not attach", poll(5000) { runtime.isAttached })
+            rig = ToneRig(channels = ToneRig.Channels.LEFT_ONLY).also { it.start() }
+            vis = ToneRig.openVisualizer(0)
+            val baseline = ToneRig.levelDb(vis, "tone-bypass-baseline")
+            runtime.controller.edit { it.setBass(12f); it.setBalance(1f) }
+            runtime.post(SessionIntent.Event.Open(rig.sessionId, ctx.packageName))
+            assertTrue("session not tracked", poll(3000) { runtime.inspect { it.sessionCount() } == 1 })
+            Thread.sleep(300)
+            val active = ToneRig.levelDb(vis, "tone-bypass-active")
+            assertTrue("balance should attenuate: base=$baseline active=$active", baseline - active > 40.0)
+
+            runtime.controller.setBypass(true)
+            assertTrue("bypass not applied", poll(3000) { !runtime.inspect { m -> m.handleFor(rig.sessionId)!!.readEnabled() } })
+            val bypassed = ToneRig.levelDb(vis, "tone-bypass-bypassed")
+            assertEquals("bypass restores flat baseline", baseline, bypassed, 0.5)
+
+            runtime.controller.setBypass(false)
+            assertTrue("re-enable not applied", poll(3000) { runtime.inspect { m -> m.handleFor(rig.sessionId)!!.readEnabled() } })
+            val restored = ToneRig.levelDb(vis, "tone-bypass-restored")
+            assertEquals("attenuation restored", active, restored, 1.0)
+        } finally {
+            vis?.release()
+            rig?.release()
+            scenario.close()
+            ctx.stopService(Intent(ctx, EqService::class.java))
+        }
+    }
 }

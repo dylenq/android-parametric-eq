@@ -26,6 +26,9 @@ class DebugCommandReceiver : BroadcastReceiver() {
                     c.edit { it.setGraphicGain(i.toUInt(), db) }
                 }
                 "set-preamp" -> c.edit { it.setPreamp(intent.getFloatExtra("db", 0f)) }
+                "set-bass" -> c.edit { it.setBass(intent.getFloatExtra("db", 0f)) }
+                "set-treble" -> c.edit { it.setTreble(intent.getFloatExtra("db", 0f)) }
+                "set-balance" -> c.edit { it.setBalance(intent.getFloatExtra("value", 0f)) }
                 "set-mode" -> {
                     val m = if (intent.getStringExtra("value") == "parametric") EqMode.PARAMETRIC else EqMode.GRAPHIC
                     c.edit { it.setMode(m) }
@@ -90,7 +93,7 @@ class DebugCommandReceiver : BroadcastReceiver() {
 
     private fun dump(rt: com.dylenq.eq.EqRuntime, nonce: String) {
         val s = rt.controller.snapshot()
-        val canon = listOf(s.mode, s.bands, s.graphicBandCount, s.graphicGainsDb, s.preampDb, s.limiterEnabled, s.bypass, s.frameDurationMs)
+        val canon = listOf(s.mode, s.bands, s.graphicBandCount, s.graphicGainsDb, s.preampDb, s.bassDb, s.trebleDb, s.balance, s.limiterEnabled, s.bypass, s.frameDurationMs)
             .joinToString("|")
         val hash = MessageDigest.getInstance("SHA-256").digest(canon.toByteArray())
             .joinToString("") { "%02x".format(it) }.take(16)
