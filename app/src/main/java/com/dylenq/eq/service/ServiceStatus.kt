@@ -14,4 +14,6 @@ data class ServiceStatus(
     val notice: String? = null,
     /** True between EqService attach and detach. */
     val serviceRunning: Boolean = false,
+    /** Measured engine band count for this OS build, or null when not measured yet. */
+    val engineMaxBands: Int? = null,
 )

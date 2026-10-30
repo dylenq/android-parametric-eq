@@ -65,6 +65,9 @@ class EqRuntime(
     /** Debug/test override of the engine band cap. Never persisted, never a measurement. */
     @Volatile private var forcedCap: Int? = null
 
+    /** Makes the forced-cap check and the core update one step across the worker and the debug thread. */
+    private val capLock = Any()
+
     /** The cap the core currently applies (forced value, else the measured one), or null when uncapped. */
     val activeEngineBandCap: Int?
         get() = forcedCap ?: measuredCap()
@@ -114,7 +117,7 @@ class EqRuntime(
     // The persisted global mode is seeded the same way; the worker applies it before its first
     // publish, and a rejection then corrects the status through onGlobalRejected.
     private val _status = MutableStateFlow(
-        ServiceStatus(bypass = controller.snapshot().bypass, globalMode = settings.globalMode, notice = when (opened.second) {
+        ServiceStatus(bypass = controller.snapshot().bypass, globalMode = settings.globalMode, engineMaxBands = measuredCap(), notice = when (opened.second) {
             is StoreNotice.NewerVersion -> "Saved settings were made by a newer version and were set aside"
             StoreNotice.Damaged -> "Saved settings were damaged and were set aside"
             null -> null
@@ -191,9 +194,11 @@ class EqRuntime(
      * restores the measured cap (uncapped when none). Never written to settings; the worker re-applies.
      */
     fun overrideEngineBandCap(n: Int?) {
-        forcedCap = n?.coerceIn(8, 512)
-        val target = forcedCap ?: measuredCap()
-        core.setEngineBandCap(target?.toUInt())
+        synchronized(capLock) {
+            forcedCap = n?.coerceIn(8, 512)
+            val target = forcedCap ?: measuredCap()
+            core.setEngineBandCap(target?.toUInt())
+        }
         markDirty()
     }
 
@@ -285,7 +290,10 @@ class EqRuntime(
             val global = manager.isGlobalOn()
             val sessions = manager.sessionInfos()
             _status.update {
-                it.copy(sessionCount = count, bypass = bypass, globalMode = global, sessions = sessions)
+                it.copy(
+                    sessionCount = count, bypass = bypass, globalMode = global, sessions = sessions,
+                    engineMaxBands = measuredCap(),
+                )
             }
         } catch (t: Throwable) {
             Log.e("EQ-SVC", "publishStatus failed: ${t.javaClass.name}: ${t.message}")
@@ -309,7 +317,7 @@ class EqRuntime(
         try {
             val n = minOf(p.measureMaxBands(EngineProbe.PROBE_BANDS), EngineProbe.PROBE_BANDS)
             settings.recordEngineProbe(n, Build.FINGERPRINT)
-            if (forcedCap == null) core.setEngineBandCap(n.toUInt())
+            synchronized(capLock) { if (forcedCap == null) core.setEngineBandCap(n.toUInt()) }
             Log.i("EQ-SVC", "engine probe: $n bands accepted")
             publishStatus()
         } catch (t: Throwable) {

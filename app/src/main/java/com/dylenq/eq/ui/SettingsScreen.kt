@@ -85,10 +85,7 @@ fun SettingsScreen(
     var startOnBoot by remember { mutableStateOf(runtime.settings.startOnBoot) }
     val sessions = remember(status.sessions) { SessionCopy.sorted(status.sessions) }
     val context = LocalContext.current
-    // The probe publishes status after it records the count, so keying on status refreshes this line.
-    val engineBandsLine = remember(status) {
-        runtime.settings.engineMaxBands?.let { "Engine bands: $it (measured)" } ?: "Engine bands: not measured yet"
-    }
+    val engineBandsLine = status.engineMaxBands?.let { "Engine bands: $it (measured)" } ?: "Engine bands: not measured yet"
     val aboutLine = remember {
         val app = try {
             context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
