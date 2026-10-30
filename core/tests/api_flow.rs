@@ -337,3 +337,79 @@ fn engine_band_cap_tracer() {
     assert!(capped.cutoffs_hz.len() <= 64, "{}", capped.cutoffs_hz.len());
     assert_ne!(capped.layout_id, full.layout_id);
 }
+
+#[test]
+fn engine_band_cap_curve_stays_honest_and_same_length() {
+    let core = parametric_with_lone_peak();
+    let full = core.response_curve(256, 48000, 85.3).unwrap();
+    core.set_engine_band_cap(Some(64));
+    let capped = core.response_curve(256, 48000, 85.3).unwrap();
+    assert_eq!(capped.freqs_hz.len(), full.freqs_hz.len());
+    assert_eq!(capped.ideal_db, full.ideal_db);
+    assert!(capped.achieved_db.iter().all(|v| v.is_finite()));
+    let worst = capped
+        .achieved_db
+        .iter()
+        .zip(&capped.ideal_db)
+        .map(|(a, i)| (a - i).abs())
+        .fold(0.0f32, f32::max);
+    assert!(worst.is_finite() && worst < 12.0, "worst deviation {worst}");
+}
+
+#[test]
+fn engine_band_cap_clearing_restores_original_output_exactly() {
+    let core = parametric_with_lone_peak();
+    let before = core.engine_params(48000, 85.3).unwrap();
+    core.set_engine_band_cap(Some(32));
+    let capped = core.engine_params(48000, 85.3).unwrap();
+    assert!(capped.cutoffs_hz.len() <= 32);
+    assert_ne!(capped.layout_id, before.layout_id);
+    core.set_engine_band_cap(None);
+    let after = core.engine_params(48000, 85.3).unwrap();
+    assert_eq!(after.layout_id, before.layout_id);
+    assert_eq!(after.cutoffs_hz, before.cutoffs_hz);
+    assert_eq!(after.gains_db, before.gains_db);
+}
+
+#[test]
+fn engine_band_cap_non_binding_keeps_layout_id() {
+    let core = EqCore::new();
+    let before = core.engine_params(48000, 85.3).unwrap();
+    core.set_engine_band_cap(Some(10_000));
+    let after = core.engine_params(48000, 85.3).unwrap();
+    assert_eq!(after.layout_id, before.layout_id);
+    assert_eq!(after.gains_db, before.gains_db);
+}
+
+#[test]
+fn engine_band_cap_lone_peak_gains_are_finite_and_bounded() {
+    let core = parametric_with_lone_peak();
+    core.set_engine_band_cap(Some(64));
+    let e = core.engine_params(48000, 85.3).unwrap();
+    assert!(e.peak_db.is_finite());
+    assert_eq!(e.cutoffs_hz.len(), e.gains_db.len());
+    assert!(e.gains_db.iter().all(|g| (-60.0..=30.0).contains(g)), "{:?}", e.gains_db);
+}
+
+#[test]
+fn engine_band_cap_is_untouched_by_undo_redo_and_not_saved() {
+    let core = EqCore::new();
+    core.set_engine_band_cap(Some(64));
+    core.set_preamp(-2.0).unwrap();
+    assert!(core.undo());
+    assert!(core.engine_params(48000, 85.3).unwrap().cutoffs_hz.len() <= 64);
+    assert!(core.redo());
+    assert!(core.engine_params(48000, 85.3).unwrap().cutoffs_hz.len() <= 64);
+
+    let path = std::env::temp_dir()
+        .join(format!("eqcore-bandcap-{}.json", std::process::id()))
+        .to_string_lossy()
+        .into_owned();
+    core.save(path.clone()).unwrap();
+    let loaded = EqCore::load(path.clone()).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let want = EqCore::new().engine_params(48000, 85.3).unwrap();
+    let got = loaded.engine_params(48000, 85.3).unwrap();
+    assert_eq!(got.layout_id, want.layout_id);
+    assert!(got.cutoffs_hz.len() > 64);
+}
