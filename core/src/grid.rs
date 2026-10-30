@@ -149,7 +149,8 @@ impl Grid {
         let nyquist = sr as f64 / 2.0;
         let kmax = ((LINEAR_REGION_HZ / binw).floor() as usize).max(1);
 
-        let mut cuts: Vec<f64> = (1..=kmax).step_by(stride).map(|k| k as f64 * binw).collect();
+        // Linear cuts sit on multiples of `stride` bins (stride, 2*stride, ...); stride 1 is every bin.
+        let mut cuts: Vec<f64> = (1..=kmax / stride).map(|j| (j * stride) as f64 * binw).collect();
         let lo = ((kmax / stride) * stride + 1) as f64 * binw;
         for i in 0..log_bands {
             let t = if log_bands == 1 { 1.0 } else { i as f64 / (log_bands - 1) as f64 };
@@ -236,6 +237,29 @@ mod tests {
         }
         assert_eq!(block_size(0.01, 48000), 8);
         assert_eq!(block_size(1000.0, 192000), 16384);
+    }
+
+    #[test]
+    fn thinned_linear_cuts_sit_on_stride_multiples() {
+        let (sr, ms) = (48000u32, 85.3f32);
+        let block = block_size(ms, sr);
+        let binw = sr as f64 / block as f64;
+        let kmax = ((LINEAR_REGION_HZ / binw).floor() as usize).max(1);
+        for stride in [1usize, 2, 3, 5] {
+            let g = Grid::build(sr, ms, stride, 40).unwrap();
+            let linear_stops = kmax / stride;
+            for j in 1..=linear_stops {
+                let want = bin_stop((j * stride) as f64 * binw, block, sr);
+                assert!(
+                    g.ranges.iter().any(|r| r.1 as i64 == want),
+                    "stride {stride}: no band edge at bin {want}"
+                );
+            }
+            assert!(g.cutoffs_hz.windows(2).all(|w| w[0] < w[1]));
+        }
+        // stride beyond kmax leaves no linear cuts but still builds a valid grid
+        let g = Grid::build(sr, ms, kmax + 5, 40).unwrap();
+        assert!(g.cutoffs_hz.windows(2).all(|w| w[0] < w[1]));
     }
 
     fn all_grids() -> Vec<Grid> {
