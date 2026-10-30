@@ -5,6 +5,7 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -39,7 +40,7 @@ class ReviewFixesTest {
         return node.config[SemanticsProperties.HorizontalScrollAxisRange].value().toInt()
     }
 
-    @Test fun noBannerNothingScrollsOnTheEmulatorWindow() {
+    @Test fun noBannerEverythingAboveTheToneCardIsVisibleAndTheCardIsReachableByScrolling() {
         val cfg = ctx.resources.configuration
         assumeTrue("needs the 411 x 891 dp class of window", cfg.screenHeightDp >= 860 && cfg.screenWidthDp in 400..420)
         rule.launch()
@@ -61,7 +62,13 @@ class ReviewFixesTest {
         }
         val max = compose.onNodeWithTag("eq-column").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].maxValue()
         Log.i("EQ-LAYOUT", "no-banner ${cfg.screenWidthDp}x${cfg.screenHeightDp} dp: root=$rootH $lines scroll-max=$max")
-        assertEquals("the column does not scroll when no banner is showing", 0f, max, 0f)
+        // Phase 8: the Tone & balance card sits under the Preamp card, so the column scrolls to reach it.
+        compose.onNodeWithTag("tone-card").assertExists()
+        assertTrue("the column scrolls to reach the tone card: $max", max > 0f)
+        for (t in listOf("bass-slider", "treble-slider", "balance-slider")) {
+            compose.onNodeWithTag(t).performScrollTo()
+            compose.onNodeWithTag(t).assertIsDisplayed()
+        }
     }
 
     @Test fun undoOnTheResetAllSnackbarNeverUndoesALaterEdit() {
