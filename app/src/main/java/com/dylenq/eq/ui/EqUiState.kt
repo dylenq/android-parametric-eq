@@ -36,6 +36,10 @@ data class EqUiState(
     /** True while any gesture (graphic slider, preamp or parametric) holds an undo group open. */
     val gestureOpen: Boolean = false,
     val preampDb: Float = 0f,
+    /** Tone and balance mirror the core snapshot; balance is the core value -1..1. */
+    val bassDb: Float = 0f,
+    val trebleDb: Float = 0f,
+    val balance: Float = 0f,
     val limiterEnabled: Boolean = true,
     /** Single source: the runtime status flow (shared with the notification action). */
     val bypass: Boolean = false,

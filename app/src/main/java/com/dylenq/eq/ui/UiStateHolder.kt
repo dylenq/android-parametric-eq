@@ -70,7 +70,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     private val _editSerial = MutableStateFlow(0)
 
     /**
-     * Counts user edits (every graphic/preamp/mode/band-count/limiter/bypass change, reset, undo and redo).
+     * Counts user edits (every graphic/preamp/bass/treble/balance/mode/band-count/limiter/bypass change, reset, undo and redo).
      * The Reset all snackbar watches it so its Undo can never undo a later, unrelated edit.
      */
     val editSerial: StateFlow<Int> = _editSerial.asStateFlow()
@@ -83,11 +83,11 @@ class UiStateHolder(val runtime: EqRuntime) {
     internal val curveComputations = AtomicInteger()
 
     // One counter for every control that holds an undo group open (graphic slider, preamp,
-    // parametric gesture): begin_edit on 0->1, end_edit on 1->0, so two fingers on two controls still
+    // bass, treble, balance, parametric gesture): begin_edit on 0->1, end_edit on 1->0, so two fingers on two controls still
     // make one step. Each source has its own flag so a double start or an unmatched end is harmless.
     // Guarded by [lock].
     private var gestureDepth = 0
-    private enum class Source { GRAPHIC, PREAMP, PARAMETRIC, ADD, FIELD }
+    private enum class Source { GRAPHIC, PREAMP, PARAMETRIC, ADD, FIELD, BASS, TREBLE, BALANCE }
     private val openSources = java.util.EnumSet.noneOf(Source::class.java)
 
     /** Opens [source]'s share of the group; a second start from the same source is ignored. */
@@ -316,6 +316,77 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun resetPreamp() = setPreamp(0f)
+
+    // ---- tone and balance (each control has its own gesture source) ---------------------------
+
+    fun setBass(db: Float) = guarded {
+        if (!db.isFinite()) return@guarded
+        edited()
+        val v = db.coerceIn(SliderMath.MIN_DB, SliderMath.MAX_DB)
+        controller.edit { it.setBass(v) }
+        _ui.update { it.copy(bassDb = v) }
+        if (gestureDepth == 0) republishLocked() else refreshCurve()
+    }
+
+    fun bassDragStart() = guarded { beginGesture(Source.BASS) }
+
+    fun bassDragEnd() = endToneGesture(Source.BASS)
+
+    /** At the default this is a no-op (no edit, no undo step); otherwise one undo step back to 0. */
+    fun resetBass() {
+        if (_ui.value.bassDb == 0f) return
+        setBass(0f)
+    }
+
+    fun setTreble(db: Float) = guarded {
+        if (!db.isFinite()) return@guarded
+        edited()
+        val v = db.coerceIn(SliderMath.MIN_DB, SliderMath.MAX_DB)
+        controller.edit { it.setTreble(v) }
+        _ui.update { it.copy(trebleDb = v) }
+        if (gestureDepth == 0) republishLocked() else refreshCurve()
+    }
+
+    fun trebleDragStart() = guarded { beginGesture(Source.TREBLE) }
+
+    fun trebleDragEnd() = endToneGesture(Source.TREBLE)
+
+    fun resetTreble() {
+        if (_ui.value.trebleDb == 0f) return
+        setTreble(0f)
+    }
+
+    /** [percent] is whole percent -100..100 (negative = left); the core gets percent / 100. */
+    fun setBalance(percent: Int) = guarded {
+        edited()
+        val v = BalanceMath.toCore(percent)
+        controller.edit { it.setBalance(v) }
+        _ui.update { it.copy(balance = v) }
+        if (gestureDepth == 0) republishLocked()
+    }
+
+    fun balanceDragStart() = guarded { beginGesture(Source.BALANCE) }
+
+    fun balanceDragEnd() = endToneGesture(Source.BALANCE)
+
+    fun resetBalance() {
+        if (_ui.value.balance == 0f) return
+        setBalance(0)
+    }
+
+    private fun endToneGesture(source: Source) {
+        try {
+            synchronized(lock) {
+                endGesture(source)
+            }
+        } catch (e: Exception) {
+            if (!isCoreFailure(e)) throw e
+            fail()
+        } finally {
+            republish()
+            refreshCurve()
+        }
+    }
 
     fun applySuggestedPreamp() = guarded {
         edited()
@@ -626,6 +697,9 @@ class UiStateHolder(val runtime: EqRuntime) {
                 parametricEnabledCount = snap.bands.count { it.enabled },
                 bands = snap.bands,
                 preampDb = snap.preampDb,
+                bassDb = snap.bassDb,
+                trebleDb = snap.trebleDb,
+                balance = snap.balance,
                 limiterEnabled = snap.limiterEnabled,
                 canUndo = snap.canUndo,
                 canRedo = snap.canRedo,

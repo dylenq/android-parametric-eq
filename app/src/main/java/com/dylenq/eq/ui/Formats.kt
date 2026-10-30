@@ -82,3 +82,33 @@ object GainSpeech {
         return "$num ${if (a == 10) "decibel" else "decibels"}"
     }
 }
+
+/** Balance label: "L 30", "Centre", "R 30" (no minus sign). [percent] is whole percent -100..100. */
+object BalanceFormat {
+    fun format(percent: Int): String = when {
+        percent < 0 -> "L ${abs(percent)}"
+        percent > 0 -> "R $percent"
+        else -> "Centre"
+    }
+}
+
+/** Spoken balance: "30 percent left", "centred", "30 percent right". */
+object BalanceSpeech {
+    fun format(percent: Int): String = when {
+        percent < 0 -> "${abs(percent)} percent left"
+        percent > 0 -> "$percent percent right"
+        else -> "centred"
+    }
+}
+
+/** Maps between the core balance (-1..1) and whole percent (-100..100). */
+object BalanceMath {
+    /** Rounded, clamped to +-100; |p| <= 1 snaps to 0 so a near-centre value reads Centre. */
+    fun toPercent(core: Float): Int {
+        if (!core.isFinite()) return 0
+        val p = (core * 100f).roundToInt().coerceIn(-100, 100)
+        return if (abs(p) <= 1) 0 else p
+    }
+
+    fun toCore(percent: Int): Float = percent.coerceIn(-100, 100) / 100f
+}
