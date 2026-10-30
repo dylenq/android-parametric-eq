@@ -24,7 +24,35 @@ class SettingsStore(private val prefs: SharedPreferences?) {
         get() = prefs?.getBoolean(KEY_BOOT, false) ?: memBoot
         set(v) { if (prefs != null) prefs.edit().putBoolean(KEY_BOOT, v).commit() else memBoot = v }
 
+    @Volatile private var memEngineBands = -1
+    @Volatile private var memEngineFp: String? = null
+
+    /** Measured DynamicsProcessing band count; null when absent or outside 8..512. */
+    val engineMaxBands: Int?
+        get() {
+            val v = prefs?.getInt(KEY_ENGINE_BANDS, -1) ?: memEngineBands
+            return if (v in MIN_ENGINE_BANDS..MAX_ENGINE_BANDS) v else null
+        }
+
+    /** The OS build fingerprint the band count was measured on. */
+    val engineProbeFingerprint: String?
+        get() = prefs?.getString(KEY_ENGINE_FP, null) ?: memEngineFp
+
+    /** Stores the count and its fingerprint together in one commit. */
+    fun recordEngineProbe(maxBands: Int, fingerprint: String) {
+        if (prefs != null) {
+            prefs.edit().putInt(KEY_ENGINE_BANDS, maxBands).putString(KEY_ENGINE_FP, fingerprint).commit()
+        } else {
+            memEngineBands = maxBands
+            memEngineFp = fingerprint
+        }
+    }
+
     companion object {
+        private const val MIN_ENGINE_BANDS = 8
+        private const val MAX_ENGINE_BANDS = 512
+        private const val KEY_ENGINE_BANDS = "engine_max_bands"
+        private const val KEY_ENGINE_FP = "engine_probe_fp"
         const val PREFS_NAME = "eq_settings"
         private const val KEY_GLOBAL = "global_mode"
         private const val KEY_BOOT = "start_on_boot"

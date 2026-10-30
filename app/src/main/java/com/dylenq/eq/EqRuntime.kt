@@ -1,11 +1,14 @@
 package com.dylenq.eq
 
 import android.media.AudioManager
+import android.os.Build
 import android.media.AudioTrack
 import android.util.Log
 import com.dylenq.eq.core.EngineParams
 import com.dylenq.eq.core.EqCore
 import com.dylenq.eq.service.EffectFactory
+import com.dylenq.eq.service.EngineProbe
+import com.dylenq.eq.service.RealEngineProbe
 import com.dylenq.eq.service.EffectManager
 import com.dylenq.eq.service.RealEffectFactory
 import com.dylenq.eq.service.ServiceStatus
@@ -46,6 +49,8 @@ class EqRuntime(
     val stateDir: File? = null,
     /** Null keeps the two flags in memory only. */
     val settings: SettingsStore = SettingsStore(null),
+    /** Null means no probe: the core stays uncapped. Before [saver] so trailing-lambda callers keep working. */
+    private val probe: EngineProbe? = null,
     saver: ((EqCore, String) -> Unit)? = null,
 ) {
     private val store: StateStore? = stateDir?.let { d ->
@@ -53,6 +58,17 @@ class EqRuntime(
     }
     private val opened: Pair<EqCore, StoreNotice?> = store?.open() ?: (EqCore() to null)
     private val core: EqCore = opened.first
+
+    // Worker only after construction: the probe runs at most once per process.
+    private var probed = false
+
+    init {
+        // A cached cap for this OS build applies before any UI curve is computed.
+        val cached = settings.engineMaxBands
+        if (cached != null && settings.engineProbeFingerprint == Build.FINGERPRINT) {
+            core.setEngineBandCap(cached.toUInt())
+        }
+    }
 
     /** The single entry point for mutating the EQ. */
     val controller: EqController = EqController(core) { markDirty() }
@@ -257,9 +273,27 @@ class EqRuntime(
 
     // Called on the worker at apply time.
     private fun currentParams(): EngineParams {
+        ensureProbed()
         val rate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC)
         val frameMs = controller.snapshot().frameDurationMs
         return controller.engineParams(rate.toUInt(), frameMs)
+    }
+
+    // Worker only. Not an edit: no markDirty, no undo step.
+    private fun ensureProbed() {
+        val p = probe ?: return
+        if (probed) return
+        probed = true
+        if (settings.engineMaxBands != null && settings.engineProbeFingerprint == Build.FINGERPRINT) return
+        try {
+            val n = minOf(p.measureMaxBands(EngineProbe.PROBE_BANDS), EngineProbe.PROBE_BANDS)
+            settings.recordEngineProbe(n, Build.FINGERPRINT)
+            core.setEngineBandCap(n.toUInt())
+            Log.i("EQ-SVC", "engine probe: $n bands accepted")
+            publishStatus()
+        } catch (t: Throwable) {
+            Log.w("EQ-SVC", "engine probe failed, staying uncapped: ${t.javaClass.name}: ${t.message}")
+        }
     }
 
     companion object {
@@ -267,6 +301,9 @@ class EqRuntime(
         const val SAVE_DEBOUNCE_MS = 500L
 
         fun create(context: android.content.Context, factory: EffectFactory = RealEffectFactory()): EqRuntime =
-            EqRuntime(factory, context.filesDir, SettingsStore(context))
+            EqRuntime(
+                factory, context.filesDir, SettingsStore(context),
+                probe = RealEngineProbe(context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager),
+            )
     }
 }
