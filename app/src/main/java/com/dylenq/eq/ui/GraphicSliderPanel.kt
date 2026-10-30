@@ -75,7 +75,6 @@ private const val HINT_SHORT = "Drag a slider"
 /** The per-slider gain label; without the unit at large font, where the column is only 48 dp wide. */
 internal fun gainLabel(db: Float, fontScale: Float): String =
     GainFormat.format(db).let { if (fontScale >= 1.3f) it.removeSuffix(" dB") else it }
-private val Tnum = TextStyle(fontFeatureSettings = "tnum")
 
 /**
  * UI-SPEC "Graphic Mode: Sliders": readout bar, pinned dB scale and a horizontally scrolling row of

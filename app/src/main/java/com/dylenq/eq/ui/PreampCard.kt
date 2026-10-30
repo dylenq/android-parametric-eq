@@ -67,7 +67,6 @@ internal const val PREAMP_STEPS = 59
 /** Shown in place of the headroom figure while the equalizer is bypassed. */
 const val BYPASSED_HEADROOM_TEXT = "Not applied while bypassed"
 const val LIMITER_DESCRIPTION = "Eases sustained loud sections. It can't catch short peaks."
-private val Tnum = TextStyle(fontFeatureSettings = "tnum")
 
 /** "Over by 2.5 dB" magnitude of a negative headroom. */
 internal fun overBy(headroomDb: Float): String = DbFormat.magnitude(-headroomDb)
@@ -158,7 +157,7 @@ fun PreampCard(
                     valueRange = PREAMP_MIN_DB..PREAMP_MAX_DB,
                     steps = PREAMP_STEPS,
                     interactionSource = interaction,
-                    thumb = { PreampThumb() },
+                    thumb = { SliderThumb() },
                     track = { st ->
                         val span = PREAMP_MAX_DB - PREAMP_MIN_DB
                         val frac = ((st.value - PREAMP_MIN_DB) / span).coerceIn(0f, 1f)
@@ -205,63 +204,6 @@ fun PreampCard(
 /** Snaps to the 0.5 dB grid inside the preamp range. */
 internal fun snapPreamp(db: Float): Float =
     (Math.round(db * 2f) / 2f).coerceIn(PREAMP_MIN_DB, PREAMP_MAX_DB).let { if (it == 0f) 0f else it }
-
-/**
- * Reports a double tap without consuming anything: the slider keeps its own press and drag handling
- * (a `detectTapGestures` parent loses the slider's drag, and never sees a tap the slider consumed),
- * so this watches the Initial pass only.
- */
-private fun Modifier.observeDoubleTap(onDoubleTap: () -> Unit): Modifier = pointerInput(Unit) {
-    var lastUp = 0L
-    var lastPos = Offset.Unspecified
-    val slop = viewConfiguration.touchSlop
-    val timeout = viewConfiguration.doubleTapTimeoutMillis
-    awaitEachGesture {
-        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-        var up: PointerInputChange? = null
-        var moved = false
-        while (true) {
-            val ev = awaitPointerEvent(PointerEventPass.Initial)
-            val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
-            if ((ch.position - down.position).getDistance() > slop) {
-                moved = true
-                break
-            }
-            if (ch.changedToUp()) {
-                up = ch
-                break
-            }
-        }
-        if (moved || up == null) {
-            lastPos = Offset.Unspecified
-        } else if (lastPos != Offset.Unspecified &&
-            up.uptimeMillis - lastUp <= timeout &&
-            (up.position - lastPos).getDistance() <= slop * 4
-        ) {
-            lastPos = Offset.Unspecified
-            onDoubleTap()
-        } else {
-            lastUp = up.uptimeMillis
-            lastPos = up.position
-        }
-    }
-}
-
-private class GestureGroup {
-    var open = false
-}
-
-/** Keeps the latest lambda without restarting effects (the gesture group outlives recompositions). */
-@Composable
-private fun <T> rememberUpdatedStateOf(v: T) = androidx.compose.runtime.rememberUpdatedState(v)
-
-/** 48 dp touch slot around a 20 dp thumb. */
-@Composable
-private fun PreampThumb() {
-    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(20.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary))
-    }
-}
 
 @Composable
 private fun PreampPill(preampDb: Float, onReset: () -> Unit) {

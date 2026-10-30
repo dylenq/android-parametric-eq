@@ -3,6 +3,7 @@ package com.dylenq.eq.ui
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -176,6 +177,24 @@ fun EqScreen(
         )
     }
 
+    val tone: @Composable (Boolean) -> Unit = { compact ->
+        ToneCard(
+            state = { ui },
+            bass = ToneActions(holder::setBass, holder::bassDragStart, holder::bassDragEnd, holder::resetBass),
+            treble = ToneActions(holder::setTreble, holder::trebleDragStart, holder::trebleDragEnd, holder::resetTreble),
+            balance = ToneActions(holder::setBalance, holder::balanceDragStart, holder::balanceDragEnd, holder::resetBalance),
+            compact = compact,
+            largeFont = spec.fontScale >= 1.3f,
+        )
+    }
+    // The Preamp card with the Tone & balance card directly under it, in every slot the preamp card had.
+    val footerStack: @Composable (Boolean, Float) -> Unit = { compact, gapDp ->
+        Column(verticalArrangement = Arrangement.spacedBy(gapDp.dp)) {
+            preamp(compact)
+            tone(compact)
+        }
+    }
+
     val modeContent: @Composable (Boolean) -> Unit = { compact ->
         val tight = spec.tight && !compact
         Crossfade(
@@ -201,7 +220,7 @@ fun EqScreen(
                     state = { ui },
                     actions = bandActions,
                     pinchHintSeen = pinchSeen.value,
-                    footer = { preamp(compact) },
+                    footer = { footerStack(compact, PANE_GAP_DP) },
                 )
             }
         }
@@ -249,7 +268,7 @@ fun EqScreen(
                             mode = mode,
                             content = { modeContent(false) },
                             // Parametric: the preamp card is the last item of the band list.
-                            preamp = { if (!parametric) preamp(false) },
+                            preamp = { if (!parametric) footerStack(false, COLUMN_GAP_DP) },
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -296,7 +315,7 @@ fun EqScreen(
                         flexIndex = 0,
                         flexMinDp = if (parametric) PARAMETRIC_LIST_MIN_DP else graphicPanelMinDp(spec.fontScale, compact = true),
                         modifier = Modifier.verticalScroll(rememberScrollState()).testTag("right-pane-scroll"),
-                        slots = listOf({ modeContent(true) }, { if (!parametric) preamp(true) }),
+                        slots = listOf({ modeContent(true) }, { if (!parametric) footerStack(true, PANE_GAP_DP) }),
                     )
                 }
             }
