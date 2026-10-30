@@ -19,6 +19,8 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpRect
@@ -311,7 +313,7 @@ class ParametricLayoutTest {
         assertTrue("list viewport >= 160 dp or the page scrolls: ${m["list_h"]} / ${m["outer_scroll_max_px"]}", m["list_h"]!! >= 160f || m["outer_scroll_max_px"]!! > 0f)
     }
 
-    @Test fun scrollingTheListLeavesTheCurveAndModeRowWhereTheyAreAndEndsInThePreampCard() {
+    @Test fun scrollingTheListLeavesTheCurveAndModeRowWhereTheyAreAndEndsInThePreampAndToneCards() {
         ctrl.edit { while (it.snapshot().bands.size < 12) it.addBand() }
         hostScreen(WindowSpec(411, 891))
         compose.waitForIdle()
@@ -322,10 +324,31 @@ class ParametricLayoutTest {
         compose.waitForIdle()
         assertEquals("curve unmoved", curve, b("curve"))
         assertEquals("mode row unmoved", mode, b("mode-row"))
-        assertTrue("the preamp card is the last list item", exists("limiter-row"))
+        // The footer (preamp + tone cards) is taller than the viewport here: scroll on to the end of the list.
+        compose.onNodeWithTag("band-list").performTouchInput { swipeUp() }
+        compose.waitForIdle()
+        assertTrue("the preamp card is in the footer", exists("limiter-row"))
+        assertTrue("the tone card is the last list item", exists("tone-card"))
         val list = b("peq-list")
-        assertTrue("limiter row inside the list viewport: ${b("limiter-row")} in $list", b("limiter-row").bottom <= list.bottom + 1.dp && b("limiter-row").top >= list.top)
-        assertTrue("nothing follows the preamp card", b("limiter-row").bottom >= list.bottom - 40.dp)
+        val tone = b("tone-card")
+        assertTrue("tone card inside the list viewport: $tone in $list", tone.bottom <= list.bottom + 1.dp && tone.top >= list.top)
+        assertTrue("tone card sits under the preamp card", b("limiter-row").bottom <= tone.top + 1.dp)
+        assertTrue("nothing follows the tone card", tone.bottom >= list.bottom - 40.dp)
+        for (t in listOf("bass-slider", "treble-slider", "balance-slider")) {
+            assertTrue("$t inside the list viewport", b(t).top >= list.top - 1.dp && b(t).bottom <= list.bottom + 1.dp)
+        }
+    }
+
+    @Test fun portraitParametricToneCardIsTheLastListItemAfterThePreampCard() {
+        hostScreen(WindowSpec(360, 800))
+        compose.waitForIdle()
+        compose.onNodeWithTag("band-list").performScrollToIndex(2 + 4)
+        compose.waitForIdle()
+        assertTrue(exists("tone-card"))
+        assertTrue("limiter above tone card", b("limiter-row").bottom <= b("tone-card").top + 1.dp)
+        assertTrue("bass above treble above balance", b("bass-slider").bottom <= b("treble-slider").top + 1.dp && b("treble-slider").bottom <= b("balance-slider").top + 1.dp)
+        val w = 360.dp
+        assertTrue("no horizontal overflow: ${b("tone-card")}", b("tone-card").left >= 0.dp && b("tone-card").right <= w)
     }
 
     @Test fun aSelectedBandBelowTheFoldIsScrolledIntoTheViewport() {
