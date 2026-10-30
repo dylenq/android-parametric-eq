@@ -92,4 +92,36 @@ class FormatsTest {
     }
 
     private fun overByText(v: Float) = "Over by ${overBy(v)} dB"
+
+    @Test fun balanceFormat() {
+        assertEquals("L 30", BalanceFormat.format(-30))
+        assertEquals("Centre", BalanceFormat.format(0))
+        assertEquals("R 30", BalanceFormat.format(30))
+        assertEquals("R 100", BalanceFormat.format(100))
+        assertEquals("L 100", BalanceFormat.format(-100))
+    }
+
+    @Test fun balanceSpeech() {
+        assertEquals("30 percent left", BalanceSpeech.format(-30))
+        assertEquals("centred", BalanceSpeech.format(0))
+        assertEquals("30 percent right", BalanceSpeech.format(30))
+        assertEquals("100 percent right", BalanceSpeech.format(100))
+    }
+
+    @Test fun balancePercentMapping() {
+        assertEquals(30, BalanceMath.toPercent(0.304f))
+        assertEquals(0, BalanceMath.toPercent(-0.006f))
+        assertEquals(0, BalanceMath.toPercent(0.01f))
+        assertEquals(2, BalanceMath.toPercent(0.02f))
+        assertEquals(100, BalanceMath.toPercent(5f))
+        assertEquals(-100, BalanceMath.toPercent(-5f))
+        assertEquals(0, BalanceMath.toPercent(Float.NaN))
+    }
+
+    @Test fun balanceToCoreClampsAndScales() {
+        assertEquals(0.3f, BalanceMath.toCore(30), 1e-6f)
+        assertEquals(1f, BalanceMath.toCore(250), 0f)
+        assertEquals(-1f, BalanceMath.toCore(-250), 0f)
+        assertEquals(0f, BalanceMath.toCore(0), 0f)
+    }
 }
