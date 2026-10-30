@@ -76,4 +76,22 @@ class RetryTest {
             Thread.interrupted()
         }
     }
+
+    @Test
+    fun non_transient_failures_are_rethrown_without_retry_or_sleep() {
+        for (fault in listOf<Throwable>(IllegalArgumentException("bad"), OutOfMemoryError())) {
+            var calls = 0
+            try {
+                retrying(3, backoff, sleeper, { _, _ -> }) {
+                    calls++
+                    throw fault
+                }
+                throw AssertionError("expected throw")
+            } catch (t: Throwable) {
+                assertSame(fault, t)
+            }
+            assertEquals(1, calls)
+        }
+        assertTrue(sleeps.isEmpty())
+    }
 }

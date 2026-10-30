@@ -6,7 +6,14 @@ fun interface Sleeper {
 }
 
 /**
- * Runs [block] up to [attempts] times. After a failed attempt that is not the last, [onRetry] is
+ * True when [t] plausibly clears on its own (a busy or restarting effect engine). Errors (OOM,
+ * linkage) and IllegalArgumentException (a configuration the platform will always reject) are not
+ * retried, so they do not stall the single effects worker.
+ */
+fun isTransientFailure(t: Throwable): Boolean = t !is Error && t !is IllegalArgumentException
+
+/**
+ * Runs [block] up to [attempts] times. A failure that [isTransientFailure] rejects is rethrown at once. After a failed attempt that is not the last, [onRetry] is
  * called and the thread pauses for backoffMs[attempt] (the last entry is reused if the array is
  * short). The last failure is rethrown. An interrupted sleep restores the interrupt flag and stops
  * retrying, rethrowing the failure that preceded it.
@@ -24,7 +31,7 @@ fun <T> retrying(
         try {
             return block()
         } catch (t: Throwable) {
-            if (attempt >= attempts - 1) throw t
+            if (attempt >= attempts - 1 || !isTransientFailure(t)) throw t
             onRetry(attempt + 1, t)
             val ms = if (backoffMs.isEmpty()) 0L else backoffMs[minOf(attempt, backoffMs.size - 1)]
             try {
