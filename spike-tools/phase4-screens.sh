@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/spike-tools/env.sh"
 source "$ROOT/spike-tools/phase3-lib.sh"
 cd "$ROOT"
-OUT="$ROOT/.planning/phases/04-graphic-eq-ui/evidence"
+OUT="$ROOT/.planning/milestones/v0.1-phases/04-graphic-eq-ui/evidence"
 mkdir -p "$OUT"
 
 bash "$ROOT/spike-tools/emulator-up.sh"

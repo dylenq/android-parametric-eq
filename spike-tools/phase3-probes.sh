@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Phase 3 Wave 0 platform probes. Records observations only; no pass/fail predicate.
-# Output: .planning/phases/03-service-and-sessions/evidence/probes.raw.log
+# Output: .planning/milestones/v0.1-phases/03-service-and-sessions/evidence/probes.raw.log
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/spike-tools/env.sh"
 cd "$ROOT"
 
 PKG=com.dylenq.eq
-OUT="$ROOT/.planning/phases/03-service-and-sessions/evidence"
+OUT="$ROOT/.planning/milestones/v0.1-phases/03-service-and-sessions/evidence"
 RAW="$OUT/probes.raw.log"
 mkdir -p "$OUT"
 : > "$RAW"

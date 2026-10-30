@@ -11,7 +11,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/spike-tools/env.sh"
 source "$ROOT/spike-tools/phase3-lib.sh"
 cd "$ROOT"
-OUT="${OUT:-$ROOT/.planning/phases/05-parametric-eq-ui/evidence}"
+OUT="${OUT:-$ROOT/.planning/milestones/v0.1-phases/05-parametric-eq-ui/evidence}"
 mkdir -p "$OUT"
 STUB=com.dylenq.playerstub
 

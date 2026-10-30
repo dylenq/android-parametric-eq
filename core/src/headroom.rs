@@ -9,7 +9,7 @@ use crate::grid::Grid;
 /// The default limiter values were measured on the emulator (AOSP effect library) with the
 /// Phase 3 Visualizer rig: all 10 rows (2 frame durations x 5 levels) matched the threshold/ratio
 /// prediction within 0.01 dB, inside the 1.5 dB bound. See
-/// `.planning/phases/03-service-and-sessions/evidence/LIMITER-TABLE.md`. This says nothing about
+/// `.planning/milestones/v0.1-phases/03-service-and-sessions/evidence/LIMITER-TABLE.md`. This says nothing about
 /// OEM vendor DSPs, and the limiter still does not stop peak clipping.
 pub const LIMITER_VERIFIED: bool = true;
 
