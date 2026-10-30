@@ -40,7 +40,7 @@ class RealEffectFactory : EffectFactory {
         b.setPreEqAllChannelsTo(eq)
         b.setInputGainAllChannelsTo(params.inputGainDb)
         b.setLimiterAllChannelsTo(limiterOf(params))
-        val dp = DynamicsProcessing(0, session, b.build())
+        val dp = DynamicsProcessing(EFFECT_PRIORITY, session, b.build())
         try {
             dp.enabled = !params.bypass
         } catch (t: Throwable) {
@@ -74,7 +74,15 @@ class RealEffectFactory : EffectFactory {
         override fun readLimiterEnabled(): Boolean = dp.getLimiterByChannelIndex(0).isEnabled
     }
 
-    private companion object {
-        const val CHANNELS = 2
+    companion object {
+        /**
+         * Effect priority passed to DynamicsProcessing. A higher value (Poweramp uses 1337) takes
+         * control from other effects on the same session, including the player's own EQ. There is
+         * no emulator evidence that a higher value helps, so the app stays cooperative at 0 until a
+         * physical-phone test says otherwise.
+         */
+        internal const val EFFECT_PRIORITY = 0
+
+        private const val CHANNELS = 2
     }
 }
