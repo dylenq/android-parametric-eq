@@ -6,7 +6,9 @@ import com.dylenq.eq.core.EngineParams
 
 interface EffectHandle {
     fun setBand(index: Int, cutoffHz: Float, gainDb: Float)
-    fun setInputGain(db: Float)
+    /** Per-channel input gain; [CH_LEFT] / [CH_RIGHT]. */
+    fun setInputGain(channel: Int, db: Float)
+    fun setInputGain(db: Float) { setInputGain(CH_LEFT, db); setInputGain(CH_RIGHT, db) }
     fun setLimiter(params: EngineParams)
     /** True when the platform accepted the change. */
     fun setEnabled(on: Boolean): Boolean
@@ -15,11 +17,16 @@ interface EffectHandle {
 
     fun readBandGain(i: Int): Float
     fun readBandCutoff(i: Int): Float
-    fun readInputGain(): Float
+    fun readInputGain(channel: Int): Float
+    fun readInputGain(): Float = readInputGain(CH_LEFT)
     fun readEnabled(): Boolean
     fun readLimiterThresholdDb(): Float
     fun readLimiterEnabled(): Boolean
 }
+
+/** DynamicsProcessing channel indices; confirmed on the emulator by BalanceMeasuredTest. */
+const val CH_LEFT = 0
+const val CH_RIGHT = 1
 
 interface EffectFactory {
     /** Throws on failure. */
@@ -38,7 +45,8 @@ class RealEffectFactory : EffectFactory {
             eq.setBand(i, DynamicsProcessing.EqBand(true, params.cutoffsHz[i], params.gainsDb[i]))
         }
         b.setPreEqAllChannelsTo(eq)
-        b.setInputGainAllChannelsTo(params.inputGainDb)
+        b.setInputGainByChannelIndex(CH_LEFT, params.inputGainLeftDb)
+        b.setInputGainByChannelIndex(CH_RIGHT, params.inputGainRightDb)
         b.setLimiterAllChannelsTo(limiterOf(params))
         val dp = DynamicsProcessing(EFFECT_PRIORITY, session, b.build())
         try {
@@ -60,7 +68,7 @@ class RealEffectFactory : EffectFactory {
         override fun setBand(index: Int, cutoffHz: Float, gainDb: Float) {
             dp.setPreEqBandAllChannelsTo(index, DynamicsProcessing.EqBand(true, cutoffHz, gainDb))
         }
-        override fun setInputGain(db: Float) { dp.setInputGainAllChannelsTo(db) }
+        override fun setInputGain(channel: Int, db: Float) { dp.setInputGainbyChannel(channel, db) }
         override fun setLimiter(params: EngineParams) { dp.setLimiterAllChannelsTo(limiterOf(params)) }
         override fun setEnabled(on: Boolean): Boolean = dp.setEnabled(on) == AudioEffect.SUCCESS
         override fun hasControl(): Boolean = dp.hasControl()
@@ -68,7 +76,7 @@ class RealEffectFactory : EffectFactory {
 
         override fun readBandGain(i: Int): Float = dp.getPreEqBandByChannelIndex(0, i).gain
         override fun readBandCutoff(i: Int): Float = dp.getPreEqBandByChannelIndex(0, i).cutoffFrequency
-        override fun readInputGain(): Float = dp.getInputGainByChannelIndex(0)
+        override fun readInputGain(channel: Int): Float = dp.getInputGainByChannelIndex(channel)
         override fun readEnabled(): Boolean = dp.enabled
         override fun readLimiterThresholdDb(): Float = dp.getLimiterByChannelIndex(0).threshold
         override fun readLimiterEnabled(): Boolean = dp.getLimiterByChannelIndex(0).isEnabled

@@ -34,7 +34,8 @@ class EffectManager(
         var state: SessionState,
     ) {
         val gains: FloatArray = p.gainsDb.toFloatArray()
-        var inputGain: Float = p.inputGainDb
+        var inputGainL: Float = p.inputGainLeftDb
+        var inputGainR: Float = p.inputGainRightDb
         var lim: Lim = Lim(p.limiter, p.limiterEnabled)
         var enabled: Boolean = !p.bypass
         val key: Key = Key(p.layoutId, p.sampleRate, p.frameDurationMs)
@@ -236,9 +237,13 @@ class EffectManager(
                 e.gains[i] = g
             }
         }
-        if (abs(p.inputGainDb - e.inputGain) > GAIN_EPSILON_DB) {
-            h.setInputGain(p.inputGainDb)
-            e.inputGain = p.inputGainDb
+        if (abs(p.inputGainLeftDb - e.inputGainL) > GAIN_EPSILON_DB) {
+            h.setInputGain(CH_LEFT, p.inputGainLeftDb)
+            e.inputGainL = p.inputGainLeftDb
+        }
+        if (abs(p.inputGainRightDb - e.inputGainR) > GAIN_EPSILON_DB) {
+            h.setInputGain(CH_RIGHT, p.inputGainRightDb)
+            e.inputGainR = p.inputGainRightDb
         }
         val lim = Lim(p.limiter, p.limiterEnabled)
         if (lim != e.lim) {

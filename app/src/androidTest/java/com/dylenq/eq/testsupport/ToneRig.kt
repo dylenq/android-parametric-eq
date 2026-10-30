@@ -15,7 +15,10 @@ class ToneRig(
     val sampleRate: Int = 48000,
     private var toneHz: Float = 1000f,
     val amplitudeDbfs: Double = -20.0,
+    val channels: Channels = Channels.BOTH,
 ) {
+    enum class Channels { BOTH, LEFT_ONLY, RIGHT_ONLY }
+
     val sessionId: Int
     private var track: AudioTrack? = null
     private val frames get() = sampleRate // 1 s buffer; integer cycles for 1 kHz-ish tones
@@ -35,8 +38,8 @@ class ToneRig(
         val cycles = Math.max(1, Math.round(toneHz.toDouble() * n / sampleRate).toInt())
         for (i in 0 until n) {
             val s = (amp * sin(2.0 * PI * cycles * i / n)).toInt().toShort()
-            out[2 * i] = s
-            out[2 * i + 1] = s
+            out[2 * i] = if (channels == Channels.RIGHT_ONLY) 0 else s
+            out[2 * i + 1] = if (channels == Channels.LEFT_ONLY) 0 else s
         }
         return out
     }

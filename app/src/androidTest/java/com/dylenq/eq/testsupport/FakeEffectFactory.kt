@@ -1,6 +1,7 @@
 package com.dylenq.eq.testsupport
 
 import com.dylenq.eq.core.EngineParams
+import com.dylenq.eq.service.CH_LEFT
 import com.dylenq.eq.service.EffectFactory
 import com.dylenq.eq.service.EffectHandle
 import java.util.concurrent.ConcurrentHashMap
@@ -53,7 +54,8 @@ class FakeEffectFactory : EffectFactory {
     inner class FakeHandle(val session: Int, params: EngineParams, private val failAfterN: Int?) : EffectHandle {
         private val gains = params.gainsDb.toMutableList()
         private val cutoffs = params.cutoffsHz.toMutableList()
-        private var inputGain = params.inputGainDb
+        private var gainL = params.inputGainLeftDb
+        private var gainR = params.inputGainRightDb
         private var enabled = !params.bypass
         private var limThr = params.limiter.thresholdDb
         private var limOn = params.limiterEnabled
@@ -74,7 +76,10 @@ class FakeEffectFactory : EffectFactory {
         override fun setBand(index: Int, cutoffHz: Float, gainDb: Float) {
             record("setBand", index, cutoffHz, gainDb); cutoffs[index] = cutoffHz; gains[index] = gainDb
         }
-        override fun setInputGain(db: Float) { record("setInputGain", db); inputGain = db }
+        override fun setInputGain(channel: Int, db: Float) {
+            record("setInputGain", channel, db)
+            if (channel == CH_LEFT) gainL = db else gainR = db
+        }
         override fun setLimiter(params: EngineParams) {
             record("setLimiter", params.limiter.thresholdDb, params.limiterEnabled)
             limThr = params.limiter.thresholdDb; limOn = params.limiterEnabled
@@ -90,7 +95,7 @@ class FakeEffectFactory : EffectFactory {
 
         override fun readBandGain(i: Int): Float = gains[i]
         override fun readBandCutoff(i: Int): Float = cutoffs[i]
-        override fun readInputGain(): Float = inputGain
+        override fun readInputGain(channel: Int): Float = if (channel == CH_LEFT) gainL else gainR
         override fun readEnabled(): Boolean = enabled
         override fun readLimiterThresholdDb(): Float = limThr
         override fun readLimiterEnabled(): Boolean = limOn
