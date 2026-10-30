@@ -564,13 +564,27 @@ class UiStateHolder(val runtime: EqRuntime) {
         writeBand(index, band.copy(q = next))
     }
 
+    /**
+     * Reset all keeps its meaning (sliders/bands and preamp, UI-SPEC A2). When that has nothing to
+     * reset but tone or balance is set, say where those are reset instead of staying silent.
+     */
+    private fun emitToneHintIfNeeded() {
+        val c = controller.snapshot()
+        if (c.bassDb != 0f || c.trebleDb != 0f || c.balance != 0f) {
+            _messages.tryEmit(UiMessage(TONE_RESET_HINT))
+        }
+    }
+
     /** Parametric: default seven bands and preamp 0 as one step. Graphic: zeroes the graphic gains and the preamp. */
     fun resetAll() = guarded {
         if (_ui.value.mode == EqMode.PARAMETRIC) {
             val before = controller.snapshot()
             controller.resetBands()
             val after = controller.snapshot()
-            if (before.bands == after.bands && before.preampDb == after.preampDb) return@guarded
+            if (before.bands == after.bands && before.preampDb == after.preampDb) {
+                emitToneHintIfNeeded()
+                return@guarded
+            }
             edited()
             _ui.update { it.copy(selectedBand = null) }
             republishLocked()
@@ -578,7 +592,10 @@ class UiStateHolder(val runtime: EqRuntime) {
             return@guarded
         }
         val s = _ui.value
-        if (s.graphicGainsDb.all { it == 0f } && s.preampDb == 0f) return@guarded
+        if (s.graphicGainsDb.all { it == 0f } && s.preampDb == 0f) {
+            emitToneHintIfNeeded()
+            return@guarded
+        }
         edited()
         controller.beginEdit()
         try {
@@ -714,3 +731,6 @@ class UiStateHolder(val runtime: EqRuntime) {
         }
     }
 }
+
+/** Shown by Reset all when only tone or balance is non-default. */
+internal const val TONE_RESET_HINT = "Tone and balance reset from the Tone & balance card"

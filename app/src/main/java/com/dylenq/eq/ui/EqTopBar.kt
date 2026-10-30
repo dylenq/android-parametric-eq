@@ -96,7 +96,8 @@ fun EqTopBar(
         )
         EqualizerToggle(on = !s.bypass, onChange = { on -> onBypass(!on) })
         OverflowMenu(
-            canReset = s.mode == EqMode.PARAMETRIC || s.graphicGainsDb.any { it != 0f } || s.preampDb != 0f,
+            canReset = s.mode == EqMode.PARAMETRIC || s.graphicGainsDb.any { it != 0f } || s.preampDb != 0f ||
+                s.bassDb != 0f || s.trebleDb != 0f || s.balance != 0f,
             onResetAll = onResetAll,
             onOpenSettings = onOpenSettings,
         )
@@ -244,9 +245,12 @@ fun rememberResetAll(holder: UiStateHolder, host: SnackbarHostState): () -> Unit
     val scope = rememberCoroutineScope()
     return remember(holder, host) {
         {
+            val serial0 = holder.editSerial.value
             holder.resetAll()
             // Parametric: the holder emits the "Bands and preamp reset" message, shown by EqMessageSnackbars.
             if (holder.ui.value.mode != EqMode.GRAPHIC) return@remember Unit
+            // Nothing was reset (only tone/balance set): the holder already emitted its hint.
+            if (holder.editSerial.value == serial0) return@remember Unit
             // Undo is only valid while nothing else has been edited since the reset; any later edit,
             // undo or redo dismisses the snackbar (otherwise Undo would undo that later edit).
             val serial = holder.editSerial.value

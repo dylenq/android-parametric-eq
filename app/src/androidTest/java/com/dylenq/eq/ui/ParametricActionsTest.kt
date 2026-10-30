@@ -189,6 +189,28 @@ class ParametricActionsTest {
         assertEquals(0, undoDepth())
     }
 
+    @Test fun resetAllWithOnlyToneSetTellsWhereToResetItAndChangesNothing() {
+        val h = newHolder()
+        h.setBass(4f)
+        h.setBalance(30)
+        messages.clear()
+        h.resetAll()
+        assertEquals(listOf(UiMessage(TONE_RESET_HINT)), messages.toList())
+        assertEquals(4f, ctrl.snapshot().bassDb, 0f)
+        assertEquals(0.3f, ctrl.snapshot().balance, 1e-6f)
+    }
+
+    @Test fun graphicResetAllWithOnlyToneSetTellsWhereToResetIt() {
+        ctrl.edit { it.setMode(EqMode.GRAPHIC) }
+        val h = UiStateHolder(rt.runtime).also { holders += it }
+        scope.launch(start = CoroutineStart.UNDISPATCHED) { h.messages.collect { messages.add(it) } }
+        h.setTreble(-3f)
+        messages.clear()
+        h.resetAll()
+        assertEquals(listOf(UiMessage(TONE_RESET_HINT)), messages.toList())
+        assertEquals(-3f, ctrl.snapshot().trebleDb, 0f)
+    }
+
     @Test fun graphicResetAllIsUnchanged() {
         ctrl.edit { it.setMode(EqMode.GRAPHIC) }
         val h = UiStateHolder(rt.runtime).also { holders += it }
