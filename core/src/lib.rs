@@ -17,6 +17,7 @@ pub mod inner;
 pub(crate) mod import;
 pub mod model;
 pub mod persist;
+pub mod presets;
 
 pub use api::EqCore;
 pub use error::EqError;

@@ -2,13 +2,21 @@
 // Reworked for Android: an explicit begin_edit/end_edit gesture API replaces the per-frame
 // `observe(before, after, gesture_active)`, and snapshots replace whole-state copies.
 
-use crate::model::Band;
+use crate::model::{Band, EqMode};
 
 const LIMIT: usize = 100;
 
+/// Mode and active-preset marker, recorded only by steps that apply a preset.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PresetCtx {
+    pub mode: EqMode,
+    pub active: Option<String>,
+}
+
 /// What undo and redo record: parametric bands, graphic band count and gains, preamp, tone (bass, treble) and balance.
-/// Mode, bypass, the limiter flag and the frame duration are listening settings, not edits,
-/// so they are neither recorded nor restored.
+/// Bypass, the limiter flag and the frame duration are listening settings, not edits, so they
+/// are never recorded. Mode and the active-preset marker travel only in `preset_ctx`, which
+/// only preset-apply steps carry; mode switches stay non-undoable.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditSnapshot {
     pub bands: Vec<Band>,
@@ -18,6 +26,7 @@ pub struct EditSnapshot {
     pub bass_db: f32,
     pub treble_db: f32,
     pub balance: f32,
+    pub preset_ctx: Option<PresetCtx>,
 }
 
 #[derive(Default)]
@@ -29,6 +38,16 @@ pub struct History {
     /// The latest `after` seen inside the gesture, to drop a drag that ended where it began.
     last_after: Option<EditSnapshot>,
     gesture: bool,
+}
+
+/// The snapshot pushed to the opposite stack: `current`, with the same context shape as the
+/// step being popped, so an ordinary edit never drags a mode change along.
+fn counterpart(current: &EditSnapshot, popped: &EditSnapshot) -> EditSnapshot {
+    let mut c = current.clone();
+    if popped.preset_ctx.is_none() {
+        c.preset_ctx = None;
+    }
+    c
 }
 
 impl History {
@@ -90,7 +109,7 @@ impl History {
         self.gesture = false;
         self.commit_pending();
         let saved = self.undo.pop()?;
-        self.redo.push(current.clone());
+        self.redo.push(counterpart(current, &saved));
         Some(saved)
     }
 
@@ -100,7 +119,7 @@ impl History {
             return None;
         }
         let saved = self.redo.pop()?;
-        self.undo.push(current.clone());
+        self.undo.push(counterpart(current, &saved));
         Some(saved)
     }
 }
@@ -119,7 +138,12 @@ mod tests {
             bass_db: 0.0,
             treble_db: 0.0,
             balance: 0.0,
+            preset_ctx: None,
         }
+    }
+
+    fn ctx(mode: EqMode, active: Option<&str>) -> Option<PresetCtx> {
+        Some(PresetCtx { mode, active: active.map(String::from) })
     }
 
     #[test]
@@ -249,5 +273,39 @@ mod tests {
         let restored = h.undo(&snap(3.0)).unwrap();
         assert_eq!(restored.preamp_db, 0.0);
         assert_eq!(restored.band_count, 10);
+    }
+
+    #[test]
+    fn an_apply_step_round_trips_its_context() {
+        let mut h = History::default();
+        let mut before = snap(0.0);
+        before.preset_ctx = ctx(EqMode::Parametric, None);
+        let mut after = snap(-6.0);
+        after.preset_ctx = ctx(EqMode::Graphic, Some("builtin:Bass"));
+        h.record(before.clone(), &after);
+        let back = h.undo(&after).unwrap();
+        assert_eq!(back, before);
+        let fwd = h.redo(&back).unwrap();
+        assert_eq!(fwd, after);
+        assert_eq!(h.undo(&fwd).unwrap(), before);
+    }
+
+    #[test]
+    fn an_ordinary_steps_counterpart_carries_no_context() {
+        let mut h = History::default();
+        h.record(snap(0.0), &snap(1.0));
+        let mut cur = snap(1.0);
+        cur.preset_ctx = ctx(EqMode::Parametric, Some("user:x"));
+        let back = h.undo(&cur).unwrap();
+        assert!(back.preset_ctx.is_none());
+        let mut cur2 = back.clone();
+        cur2.preset_ctx = ctx(EqMode::Parametric, Some("user:x"));
+        let fwd = h.redo(&cur2).unwrap();
+        assert!(fwd.preset_ctx.is_none());
+        // The counterpart pushed back onto undo has no ctx either.
+        let mut cur3 = fwd.clone();
+        cur3.preset_ctx = ctx(EqMode::Graphic, None);
+        assert!(h.undo(&cur3).unwrap().preset_ctx.is_none());
+        assert!(h.redo(&snap(0.0)).unwrap().preset_ctx.is_none());
     }
 }

@@ -8,7 +8,8 @@ use crate::fit;
 use crate::graphic;
 use crate::grid::{self, Grid};
 use crate::headroom::{self, LimiterParams};
-use crate::history::{EditSnapshot, History};
+use crate::history::{EditSnapshot, History, PresetCtx};
+use crate::presets::{self, MAX_USER_PRESETS, Preset, PresetCurve};
 use crate::model::{Band, EqMode, EqState, FilterKind, GraphicState, MAX_BANDS, MAX_GAIN_DB};
 
 pub const DEFAULT_FRAME_MS: f32 = 85.3;
@@ -40,6 +41,10 @@ pub struct Inner {
     pub limiter_enabled: bool,
     pub bypass: bool,
     pub frame_duration_ms: f32,
+    /// User presets in creation order (built-ins are code, not stored).
+    pub presets: Vec<Preset>,
+    /// Key of the preset last applied or saved (`builtin:<name>` / `user:<name>`).
+    pub active_preset: Option<String>,
     pub(crate) history: History,
     /// Device state, never saved or put in undo history: the most bands the engine accepts.
     pub(crate) engine_band_cap: Option<usize>,
@@ -58,6 +63,8 @@ impl Default for Inner {
             limiter_enabled: true,
             bypass: false,
             frame_duration_ms: DEFAULT_FRAME_MS,
+            presets: Vec::new(),
+            active_preset: None,
             history: History::default(),
             engine_band_cap: None,
         }
@@ -104,6 +111,15 @@ impl Inner {
             bass_db: self.bass_db,
             treble_db: self.treble_db,
             balance: self.balance,
+            preset_ctx: None,
+        }
+    }
+
+    /// A snapshot that also carries the mode and the active-preset marker (apply steps only).
+    fn ctx_snapshot(&self) -> EditSnapshot {
+        EditSnapshot {
+            preset_ctx: Some(PresetCtx { mode: self.mode, active: self.active_preset.clone() }),
+            ..self.edit_snapshot()
         }
     }
 
@@ -114,6 +130,10 @@ impl Inner {
         self.bass_db = s.bass_db;
         self.treble_db = s.treble_db;
         self.balance = s.balance;
+        if let Some(ctx) = s.preset_ctx {
+            self.mode = ctx.mode;
+            self.active_preset = ctx.active.filter(|k| self.find_preset(k).is_some());
+        }
     }
 
     /// Runs a validated mutation and records it. `f` must not mutate when it returns Err.
@@ -238,7 +258,7 @@ impl Inner {
     }
 
     pub fn undo(&mut self) -> bool {
-        let cur = self.edit_snapshot();
+        let cur = self.ctx_snapshot();
         match self.history.undo(&cur) {
             Some(s) => {
                 self.apply(s);
@@ -249,7 +269,7 @@ impl Inner {
     }
 
     pub fn redo(&mut self) -> bool {
-        let cur = self.edit_snapshot();
+        let cur = self.ctx_snapshot();
         match self.history.redo(&cur) {
             Some(s) => {
                 self.apply(s);
@@ -412,13 +432,129 @@ impl Inner {
         })
     }
 
+    // ---- presets ----
+
+    /// Resolves a key against the built-ins and the user presets.
+    pub fn find_preset(&self, key: &str) -> Option<Preset> {
+        presets::find_in(&self.presets, key)
+    }
+
+    fn apply_curve(&mut self, c: &PresetCurve) {
+        self.parametric = c.bands.clone();
+        self.graphic = GraphicState {
+            band_count: c.graphic_band_count,
+            gains_db: c.graphic_gains_db.clone(),
+        };
+        self.preamp_db = c.preamp_db;
+        self.bass_db = c.bass_db;
+        self.treble_db = c.treble_db;
+        self.balance = c.balance;
+        self.mode = c.mode;
+    }
+
+    /// Replaces mode, both editors, preamp, tone and balance in one undo step. Returns whether a
+    /// step was recorded (false when nothing changed). Does not close an open gesture.
+    pub fn apply_preset(&mut self, key: &str) -> Result<bool, EqError> {
+        let mut preset = self.find_preset(key).ok_or(EqError::NotFound)?;
+        if !preset.curve.sanitize() {
+            return Err(EqError::InvalidValue);
+        }
+        let stored_key = if key.starts_with("builtin:") {
+            presets::builtin_key(&preset.name)
+        } else {
+            presets::user_key(&preset.name)
+        };
+        let before = self.ctx_snapshot();
+        self.apply_curve(&preset.curve);
+        self.active_preset = Some(stored_key);
+        let after = self.ctx_snapshot();
+        self.history.record(before.clone(), &after);
+        Ok(before != after)
+    }
+
+    fn builtin_name_taken(name: &str) -> bool {
+        let n = presets::normalize(name);
+        presets::builtin_presets().iter().any(|p| presets::normalize(&p.name) == n)
+    }
+
+    /// Stores the current sound as a user preset (overwriting a same-named one) and makes it
+    /// active. Not an undo step. Returns the key.
+    pub fn save_preset(&mut self, name: &str) -> Result<String, EqError> {
+        let name = presets::validate_name(name)?;
+        if Self::builtin_name_taken(&name) {
+            return Err(EqError::NameTaken);
+        }
+        let curve = PresetCurve::from_inner(self);
+        let norm = presets::normalize(&name);
+        let stored = match self.presets.iter().position(|p| presets::normalize(&p.name) == norm) {
+            Some(i) => {
+                self.presets[i].curve = curve;
+                self.presets[i].name.clone()
+            }
+            None => {
+                if self.presets.len() >= MAX_USER_PRESETS {
+                    return Err(EqError::TooManyPresets);
+                }
+                self.presets.push(Preset { name: name.clone(), curve });
+                name
+            }
+        };
+        let key = presets::user_key(&stored);
+        self.active_preset = Some(key.clone());
+        Ok(key)
+    }
+
+    fn user_index(&self, key: &str) -> Result<usize, EqError> {
+        if key.starts_with("builtin:") {
+            return Err(EqError::ReadOnly);
+        }
+        let name = key.strip_prefix("user:").ok_or(EqError::NotFound)?;
+        self.presets.iter().position(|p| p.name == name).ok_or(EqError::NotFound)
+    }
+
+    /// Renames a user preset; the active marker follows it. Returns the new key.
+    pub fn rename_preset(&mut self, key: &str, new_name: &str) -> Result<String, EqError> {
+        let i = self.user_index(key)?;
+        let name = presets::validate_name(new_name)?;
+        let norm = presets::normalize(&name);
+        let clash = Self::builtin_name_taken(&name)
+            || self.presets.iter().enumerate().any(|(j, p)| j != i && presets::normalize(&p.name) == norm);
+        if clash {
+            return Err(EqError::NameTaken);
+        }
+        self.presets[i].name = name.clone();
+        let new_key = presets::user_key(&name);
+        if self.active_preset.as_deref() == Some(key) {
+            self.active_preset = Some(new_key.clone());
+        }
+        Ok(new_key)
+    }
+
+    /// Deletes a user preset. If it was active the marker clears; the sound is unchanged.
+    pub fn delete_preset(&mut self, key: &str) -> Result<(), EqError> {
+        let i = self.user_index(key)?;
+        self.presets.remove(i);
+        if self.active_preset.as_deref() == Some(key) {
+            self.active_preset = None;
+        }
+        Ok(())
+    }
+
+    /// True when the active preset resolves and the live state differs from it.
+    pub fn is_modified(&self) -> bool {
+        match self.active_preset.as_deref().and_then(|k| self.find_preset(k)) {
+            Some(p) => !presets::curves_equal(&PresetCurve::from_inner(self), &p.curve),
+            None => false,
+        }
+    }
+
     pub fn graphic_centres(&self) -> Vec<f32> {
         graphic::centres(self.graphic.band_count).map(|c| c.to_vec()).unwrap_or_default()
     }
 }
 
 /// Snaps near-centre balance to exactly 0 and clamps to -1..1.
-fn snap_balance(v: f32) -> f32 {
+pub(crate) fn snap_balance(v: f32) -> f32 {
     let c = v.clamp(-1.0, 1.0);
     if c.abs() <= BALANCE_SNAP { 0.0 } else { c }
 }

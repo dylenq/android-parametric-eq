@@ -8,6 +8,7 @@ use crate::headroom::LimiterParams;
 use crate::inner::{DEFAULT_FRAME_MS, Inner};
 use crate::model::{Band, EqMode};
 use crate::persist;
+use crate::presets;
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Snapshot {
@@ -25,6 +26,19 @@ pub struct Snapshot {
     pub frame_duration_ms: f32,
     pub can_undo: bool,
     pub can_redo: bool,
+    /// Built-ins first, then user presets in creation order.
+    pub presets: Vec<PresetInfo>,
+    pub active_preset_key: Option<String>,
+    pub active_preset_name: Option<String>,
+    /// The live sound differs from the active preset (computed, never stored).
+    pub preset_modified: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct PresetInfo {
+    pub key: String,
+    pub name: String,
+    pub builtin: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -96,6 +110,16 @@ impl EqCore {
 
     pub fn snapshot(&self) -> Snapshot {
         let s = self.lock();
+        let mut list: Vec<PresetInfo> = presets::builtin_presets()
+            .into_iter()
+            .map(|p| PresetInfo { key: presets::builtin_key(&p.name), name: p.name, builtin: true })
+            .collect();
+        list.extend(
+            s.presets
+                .iter()
+                .map(|p| PresetInfo { key: presets::user_key(&p.name), name: p.name.clone(), builtin: false }),
+        );
+        let active = s.active_preset.as_deref().and_then(|k| s.find_preset(k));
         Snapshot {
             mode: s.mode,
             bands: s.parametric.clone(),
@@ -111,6 +135,10 @@ impl EqCore {
             frame_duration_ms: s.frame_duration_ms,
             can_undo: s.can_undo(),
             can_redo: s.can_redo(),
+            presets: list,
+            active_preset_key: active.as_ref().and_then(|_| s.active_preset.clone()),
+            active_preset_name: active.map(|p| p.name),
+            preset_modified: s.is_modified(),
         }
     }
 
@@ -170,6 +198,23 @@ impl EqCore {
     /// saved, not undoable, does not mark the state dirty. `None` clears it.
     pub fn set_engine_band_cap(&self, max_bands: Option<u32>) {
         self.lock().engine_band_cap = max_bands.map(|v| v as usize);
+    }
+
+    /// Applies a preset as one undo step. Returns whether a step was recorded.
+    pub fn apply_preset(&self, key: String) -> Result<bool, EqError> {
+        self.lock().apply_preset(&key)
+    }
+
+    pub fn save_preset(&self, name: String) -> Result<String, EqError> {
+        self.lock().save_preset(&name)
+    }
+
+    pub fn rename_preset(&self, key: String, new_name: String) -> Result<String, EqError> {
+        self.lock().rename_preset(&key, &new_name)
+    }
+
+    pub fn delete_preset(&self, key: String) -> Result<(), EqError> {
+        self.lock().delete_preset(&key)
     }
 
     pub fn begin_edit(&self) {

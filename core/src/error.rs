@@ -14,6 +14,16 @@ pub enum EqError {
     InvalidValue,
     #[error("a parametric EQ holds at most 16 bands")]
     TooManyBands,
+    #[error("a preset with that name already exists")]
+    NameTaken,
+    #[error("preset names must be 1 to 40 characters")]
+    InvalidName,
+    #[error("that preset no longer exists")]
+    NotFound,
+    #[error("built-in presets cannot be changed")]
+    ReadOnly,
+    #[error("you can keep up to 100 presets")]
+    TooManyPresets,
 }
 
 impl From<crate::model::GraphicError> for EqError {
