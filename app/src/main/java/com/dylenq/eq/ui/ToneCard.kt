@@ -26,7 +26,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -152,6 +158,9 @@ internal fun snapBalance(raw: Float): Int {
     return if (abs(p) <= 1) 0 else p
 }
 
+/** Idle time after a slider value change with no drag before its undo group is closed. */
+private const val DISCRETE_EDIT_IDLE_MS = 400L
+
 /**
  * One control row. [prepare] turns a raw slider value into the snapped new value, or null when nothing
  * changes (so no empty undo step starts); [commit] then stores it. The gesture group is per row.
@@ -195,12 +204,28 @@ private fun ToneRow(
             endNow()
         }
     }
+    // A value change with no pointer drag (TalkBack SetProgress, D-pad) may arrive without
+    // onValueChangeFinished; close the group after a short idle so undo is never blocked.
+    val scope = rememberCoroutineScope()
+    var dragging by remember { mutableStateOf(false) }
+    var idleJob by remember { mutableStateOf<Job?>(null) }
+    fun scheduleIdleClose() {
+        idleJob?.cancel()
+        idleJob = scope.launch {
+            delay(DISCRETE_EDIT_IDLE_MS)
+            if (!dragging) end()
+        }
+    }
     DisposableEffect(Unit) { onDispose { end() } }
     LaunchedEffect(interaction) {
         interaction.interactions.collect {
             when (it) {
-                is DragInteraction.Start -> haptics.dragStart()
+                is DragInteraction.Start -> {
+                    dragging = true
+                    haptics.dragStart()
+                }
                 is DragInteraction.Stop, is DragInteraction.Cancel -> {
+                    dragging = false
                     end()
                     haptics.dragEnd()
                 }
@@ -232,6 +257,7 @@ private fun ToneRow(
                     begin()
                     haptic(haptics, current(), v)
                     commit(v)
+                    scheduleIdleClose()
                 }
             },
             onValueChangeFinished = { end() },

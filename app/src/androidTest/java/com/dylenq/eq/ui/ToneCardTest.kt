@@ -245,6 +245,25 @@ class ToneCardTest {
         assertEquals(0f, ctrl.snapshot().trebleDb, 0f)
     }
 
+    @Test fun discreteChangesNeverLeaveAGroupOpenAndUndoStillWorks() {
+        hostCard()
+        // Back-to-back SetProgress calls (accessibility path), then let the idle close run.
+        setProgress("bass-slider", 3f)
+        setProgress("bass-slider", 6f)
+        setProgress("balance-slider", 40f)
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.waitForIdle()
+        assertFalse("group must be closed after idle", holder.ui.value.gestureOpen)
+        assertEquals(6f, ctrl.snapshot().bassDb, 0f)
+        assertTrue("undo must be available", ctrl.snapshot().canUndo)
+        assertTrue(ctrl.snapshot().balance != 0f)
+        holder.undo()
+        compose.waitForIdle()
+        assertEquals("undo reverts the last edit", 0f, ctrl.snapshot().balance, 0f)
+        assertEquals(6f, ctrl.snapshot().bassDb, 0f)
+        assertFalse(holder.ui.value.gestureOpen)
+    }
+
     @Test fun dragIsOneUndoStep() {
         hostCard()
         compose.onNodeWithTag("bass-slider").performTouchInput {
