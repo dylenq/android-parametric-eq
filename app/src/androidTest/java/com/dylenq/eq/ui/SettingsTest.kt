@@ -180,6 +180,21 @@ class SettingsTest {
         assertEquals(2, holder.ui.value.selectedBand)
         assertTrue(exists("eq-column") || exists("two-pane"))
     }
+
+    @Test fun engineBandsLineShowsTheMeasuredCount() {
+        rule.runtimeRule.settings.recordEngineProbe(512, android.os.Build.FINGERPRINT)
+        rule.launch(); compose.waitForIdle()
+        openSettings()
+        compose.onNodeWithTag("engine-bands").performScrollTo().assertIsDisplayed()
+        assertTrue(existsText("Engine bands: 512 (measured)"))
+    }
+
+    @Test fun engineBandsLineWithoutMeasurementSaysNotMeasured() {
+        rule.launch(); compose.waitForIdle()
+        openSettings()
+        compose.onNodeWithTag("engine-bands").performScrollTo().assertIsDisplayed()
+        assertTrue(existsText("Engine bands: not measured yet"))
+    }
 }
 
 /** The rejection path needs a factory that refuses session 0 (global mode), so it has its own rule. */
