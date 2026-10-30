@@ -12,6 +12,13 @@ pub const MAX_BLOCK: u32 = 16384;
 pub const LINEAR_REGION_HZ: f64 = 600.0;
 /// Number of log-spaced points above the linear region (before dedupe).
 pub const LOG_BANDS: usize = 256;
+/// A cap below this is raised to it; the engine never gets fewer bands.
+pub const MIN_ENGINE_BANDS: usize = 8;
+/// Fewest log-spaced bands kept while the linear region is thinned instead.
+pub const MIN_LOG_BANDS: usize = 32;
+/// Band count the app requests when probing what the engine really allocates. At least as large
+/// as every grid `Grid::hybrid` can build for 44.1/48/96 kHz and 5..=300 ms frames.
+pub const PROBE_BANDS: usize = 512;
 
 /// Rejected inputs; the API layer maps these to its own error type.
 #[derive(Clone, Debug, PartialEq)]
@@ -71,6 +78,66 @@ impl Grid {
     /// deduplicated on `bin_stop`. Cutoffs are re-emitted at the bin centre so f32 rounding on
     /// the device cannot move a band edge.
     pub fn hybrid(sr: u32, frame_ms: f32) -> Result<Grid, GridError> {
+        Self::build(sr, frame_ms, 1, LOG_BANDS)
+    }
+
+    /// Hybrid grid fitted to an engine band cap. `None`, or a cap (raised to `MIN_ENGINE_BANDS`)
+    /// that the full grid already fits, returns exactly `Grid::hybrid`. Otherwise the log band
+    /// count is reduced first, then the linear region is thinned (stride 2, 3, ...), then the log
+    /// bands are thinned below `MIN_LOG_BANDS`.
+    pub fn hybrid_capped(sr: u32, frame_ms: f32, max_bands: Option<usize>) -> Result<Grid, GridError> {
+        let full = Self::hybrid(sr, frame_ms)?;
+        let cap = match max_bands {
+            None => return Ok(full),
+            Some(c) => c.max(MIN_ENGINE_BANDS),
+        };
+        if full.band_count() <= cap {
+            return Ok(full);
+        }
+        let make = |stride: usize, log: usize| Self::build(sr, frame_ms, stride, log);
+        // 1. Fewer log bands, linear region intact.
+        if make(1, MIN_LOG_BANDS)?.band_count() <= cap {
+            let (mut lo, mut hi) = (MIN_LOG_BANDS, LOG_BANDS);
+            while hi - lo > 1 {
+                let mid = (lo + hi) / 2;
+                if make(1, mid)?.band_count() <= cap {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            // Dedupe makes the count only near-monotone: step down until it fits.
+            let mut l = lo;
+            loop {
+                let g = make(1, l)?;
+                if g.band_count() <= cap || l <= MIN_LOG_BANDS {
+                    return Ok(g);
+                }
+                l -= 1;
+            }
+        }
+        // 2. Thin the linear region.
+        let kmax = ((LINEAR_REGION_HZ / (sr as f64 / block_size(frame_ms, sr) as f64)).floor() as usize).max(1);
+        for stride in 2..=kmax + 1 {
+            let g = make(stride, MIN_LOG_BANDS)?;
+            if g.band_count() <= cap {
+                return Ok(g);
+            }
+        }
+        // 3. No linear region left: thin the log bands.
+        let mut l = MIN_LOG_BANDS;
+        loop {
+            let g = make(kmax + 1, l)?;
+            if g.band_count() <= cap || l <= 1 {
+                return Ok(g);
+            }
+            l -= 1;
+        }
+    }
+
+    fn build(sr: u32, frame_ms: f32, stride: usize, log_bands: usize) -> Result<Grid, GridError> {
+        let stride = stride.max(1);
+        let log_bands = log_bands.max(1);
         if !(8000..=192_000).contains(&sr) {
             return Err(GridError::SampleRate(sr));
         }
@@ -82,10 +149,10 @@ impl Grid {
         let nyquist = sr as f64 / 2.0;
         let kmax = ((LINEAR_REGION_HZ / binw).floor() as usize).max(1);
 
-        let mut cuts: Vec<f64> = (1..=kmax).map(|k| k as f64 * binw).collect();
-        let lo = (kmax + 1) as f64 * binw;
-        for i in 0..LOG_BANDS {
-            let t = i as f64 / (LOG_BANDS - 1) as f64;
+        let mut cuts: Vec<f64> = (1..=kmax).step_by(stride).map(|k| k as f64 * binw).collect();
+        let lo = ((kmax / stride) * stride + 1) as f64 * binw;
+        for i in 0..log_bands {
+            let t = if log_bands == 1 { 1.0 } else { i as f64 / (log_bands - 1) as f64 };
             cuts.push(lo * (nyquist / lo).powf(t));
         }
         if let Some(last) = cuts.last_mut() {

@@ -25,6 +25,8 @@ pub struct Inner {
     pub bypass: bool,
     pub frame_duration_ms: f32,
     pub(crate) history: History,
+    /// Device state, never saved or put in undo history: the most bands the engine accepts.
+    pub(crate) engine_band_cap: Option<usize>,
 }
 
 impl Default for Inner {
@@ -38,6 +40,7 @@ impl Default for Inner {
             bypass: false,
             frame_duration_ms: DEFAULT_FRAME_MS,
             history: History::default(),
+            engine_band_cap: None,
         }
     }
 }
@@ -233,8 +236,8 @@ impl Inner {
         }
     }
 
-    fn grid_for(sample_rate: u32, frame_ms: f32) -> Result<Grid, EqError> {
-        Grid::hybrid(sample_rate, frame_ms).map_err(|_| EqError::InvalidValue)
+    fn grid_for(&self, sample_rate: u32, frame_ms: f32) -> Result<Grid, EqError> {
+        Grid::hybrid_capped(sample_rate, frame_ms, self.engine_band_cap).map_err(|_| EqError::InvalidValue)
     }
 
     pub fn response_curve(
@@ -246,7 +249,7 @@ impl Inner {
         if !(MIN_CURVE_POINTS..=MAX_CURVE_POINTS).contains(&points) {
             return Err(EqError::InvalidValue);
         }
-        let grid = Self::grid_for(sample_rate, frame_ms)?;
+        let grid = self.grid_for(sample_rate, frame_ms)?;
         let sr = sample_rate as f64;
         let target = self.target(sr);
         let gains = fit::fit(&grid, &target);
@@ -292,7 +295,7 @@ impl Inner {
     }
 
     pub fn engine_params(&self, sample_rate: u32, frame_ms: f32) -> Result<Engine, EqError> {
-        let grid = Self::grid_for(sample_rate, frame_ms)?;
+        let grid = self.grid_for(sample_rate, frame_ms)?;
         let target = self.target(sample_rate as f64);
         let gains = fit::fit(&grid, &target);
         let peak = headroom::peak_db(&grid, &gains);

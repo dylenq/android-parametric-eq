@@ -146,6 +146,12 @@ impl EqCore {
         self.lock().set_frame_duration_ms(ms)
     }
 
+    /// Limits the engine grid to at most `max_bands` bands (raised to 8). Device state: not
+    /// saved, not undoable, does not mark the state dirty. `None` clears it.
+    pub fn set_engine_band_cap(&self, max_bands: Option<u32>) {
+        self.lock().engine_band_cap = max_bands.map(|v| v as usize);
+    }
+
     pub fn begin_edit(&self) {
         self.lock().begin_edit();
     }

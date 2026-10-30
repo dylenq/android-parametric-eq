@@ -327,3 +327,13 @@ fn band_response_db_through_the_object() {
     assert_eq!(r.len(), 64);
     assert_eq!(core.band_response_db(99, 64, 48_000), Err(EqError::OutOfRange));
 }
+
+#[test]
+fn engine_band_cap_tracer() {
+    let core = EqCore::new();
+    let full = core.engine_params(48000, 85.3).unwrap();
+    core.set_engine_band_cap(Some(64));
+    let capped = core.engine_params(48000, 85.3).unwrap();
+    assert!(capped.cutoffs_hz.len() <= 64, "{}", capped.cutoffs_hz.len());
+    assert_ne!(capped.layout_id, full.layout_id);
+}
