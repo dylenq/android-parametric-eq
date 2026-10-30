@@ -298,4 +298,115 @@ class UiStateHolderTest {
         assertTrue("expected a handful of computations, got $computations", computations <= 25)
         assertEquals(finalGain, s.graphicGainsDb[6], 0f)
     }
+
+    // ---- tone and balance ----------------------------------------------------------------
+
+    private fun undoDepth(h: UiStateHolder): Int {
+        var n = 0
+        while (h.ui.value.canUndo && n < 50) { h.undo(); n++ }
+        return n
+    }
+
+    @Test fun bassTracer() {
+        val h = newHolder()
+        val before = await(h) { it.curve != null }.curve!!
+        fun peak(c: CurvePoints): Float {
+            var best = -100f
+            for (i in c.freqsHz.indices) if (c.freqsHz[i] in 60f..160f) best = maxOf(best, c.idealDb[i])
+            return best
+        }
+        val peakBefore = peak(before)
+        h.setBass(6f)
+        assertEquals(6f, h.ui.value.bassDb, 0f)
+        assertEquals(6f, ctrl.snapshot().bassDb, 0f)
+        val after = await(h) { s -> s.curve != null && peak(s.curve!!) > peakBefore + 1f }.curve!!
+        assertTrue(peak(after) > peakBefore + 1f)
+        h.undo()
+        assertEquals(0f, h.ui.value.bassDb, 0f)
+        assertEquals(0f, ctrl.snapshot().bassDb, 0f)
+    }
+
+    @Test fun bassDragIsOneUndoStep() {
+        val h = newHolder()
+        h.bassDragStart()
+        for (db in listOf(1f, 2.5f, 4f)) h.setBass(db)
+        h.bassDragEnd()
+        assertEquals(4f, h.ui.value.bassDb, 0f)
+        assertEquals(1, undoDepth(h))
+        assertEquals(0f, h.ui.value.bassDb, 0f)
+    }
+
+    @Test fun toneGesturesHaveSeparateSources() {
+        val h = newHolder()
+        h.bassDragStart()
+        h.balanceDragStart()
+        h.setBass(3f)
+        h.setBalance(40)
+        h.bassDragEnd()
+        assertTrue("balance group stays open after bass ends", h.ui.value.gestureOpen)
+        h.undo() // inert while a gesture is open
+        assertEquals(3f, h.ui.value.bassDb, 0f)
+        h.setBalance(50)
+        h.balanceDragEnd()
+        assertFalse(h.ui.value.gestureOpen)
+        assertEquals(0.5f, h.ui.value.balance, 1e-6f)
+        assertEquals("overlapping drags make one step", 1, undoDepth(h))
+        assertEquals(0f, h.ui.value.bassDb, 0f)
+        assertEquals(0f, h.ui.value.balance, 0f)
+    }
+
+    @Test fun resetsAtDefaultAddNoUndoStep() {
+        val h = newHolder()
+        h.resetBass(); h.resetTreble(); h.resetBalance()
+        assertFalse(h.ui.value.canUndo)
+        assertEquals(0, undoDepth(h))
+    }
+
+    @Test fun resetsFromNonDefaultAreOneStepEach() {
+        val h = newHolder()
+        h.setBass(5f); h.setTreble(-4f); h.setBalance(-25)
+        val base = undoDepth(h)
+        assertEquals(3, base)
+        h.redo(); h.redo(); h.redo()
+        assertEquals(5f, h.ui.value.bassDb, 0f)
+        h.resetBass(); h.resetTreble(); h.resetBalance()
+        assertEquals(0f, h.ui.value.bassDb, 0f)
+        assertEquals(0f, h.ui.value.trebleDb, 0f)
+        assertEquals(0f, h.ui.value.balance, 0f)
+        h.undo()
+        assertEquals(-0.25f, h.ui.value.balance, 1e-6f)
+        h.undo()
+        assertEquals(-4f, h.ui.value.trebleDb, 0f)
+        h.undo()
+        assertEquals(5f, h.ui.value.bassDb, 0f)
+    }
+
+    @Test fun undoRedoUpdateToneState() {
+        val h = newHolder()
+        h.setBass(2f); h.setTreble(3f); h.setBalance(30)
+        h.undo()
+        assertEquals(0f, h.ui.value.balance, 0f)
+        h.undo()
+        assertEquals(0f, h.ui.value.trebleDb, 0f)
+        h.undo()
+        assertEquals(0f, h.ui.value.bassDb, 0f)
+        h.redo(); h.redo(); h.redo()
+        assertEquals(2f, h.ui.value.bassDb, 0f)
+        assertEquals(3f, h.ui.value.trebleDb, 0f)
+        assertEquals(0.3f, h.ui.value.balance, 1e-6f)
+    }
+
+    @Test fun balanceClampsAndDefaultsAreZero() {
+        assertEquals(0f, EqUiState().bassDb, 0f)
+        assertEquals(0f, EqUiState().trebleDb, 0f)
+        assertEquals(0f, EqUiState().balance, 0f)
+        val h = newHolder()
+        h.setBalance(250)
+        assertEquals(1f, h.ui.value.balance, 0f)
+        assertEquals(1f, ctrl.snapshot().balance, 0f)
+        h.setBass(99f)
+        assertEquals(12f, ctrl.snapshot().bassDb, 0f)
+        h.setTreble(-99f)
+        assertEquals(-12f, ctrl.snapshot().trebleDb, 0f)
+    }
 }

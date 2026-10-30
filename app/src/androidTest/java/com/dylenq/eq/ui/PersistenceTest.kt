@@ -90,6 +90,32 @@ class PersistenceTest {
         }
     }
 
+    @Test fun toneAndBalanceSurviveANewRuntimeOnTheSameState() {
+        rule.launch()
+        compose.waitForIdle()
+        ctrl.edit {
+            it.setBass(3.5f)
+            it.setTreble(-2.0f)
+            it.setBalance(0.3f)
+        }
+        rule.runtime.flush()
+
+        val second = EqRuntime(FakeEffectFactory(), rule.runtimeRule.dir, SettingsStore(null))
+        try {
+            val h2 = UiStateHolder(second)
+            try {
+                val s = runBlocking { withTimeout(5000) { h2.ui.first { true } } }
+                assertEquals(3.5f, s.bassDb, 0.001f)
+                assertEquals(-2.0f, s.trebleDb, 0.001f)
+                assertEquals(0.3f, s.balance, 0.001f)
+            } finally {
+                h2.close()
+            }
+        } finally {
+            second.shutdown()
+        }
+    }
+
     @Test fun rotationKeepsBandCountModeValuesAndScrollPosition() {
         val scenario = rule.launch()
         compose.waitForIdle()
