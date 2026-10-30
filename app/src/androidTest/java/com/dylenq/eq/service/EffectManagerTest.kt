@@ -225,7 +225,7 @@ class EffectManagerTest {
 
     @Test
     fun a_throwable_from_the_factory_never_escapes() {
-        fake.failNextCreates(3, Error("boom"))
+        fake.failNextCreates(1, Error("boom")) // an Error is not retried, so one attempt consumes it
         mgr.onOpen(1, "com.a.b")
         assertEquals(0, mgr.sessionCount())
         assertEquals(SessionState.FAILED, mgr.sessionInfos().single().state)

@@ -183,6 +183,7 @@ class SettingsTest {
 
     @Test fun engineBandsLineShowsTheMeasuredCount() {
         rule.runtimeRule.settings.recordEngineProbe(512, android.os.Build.FINGERPRINT)
+        rule.runtime.markDirty() // the worker's next publish carries the new count, as after a real probe
         rule.launch(); compose.waitForIdle()
         openSettings()
         compose.onNodeWithTag("engine-bands").performScrollTo().assertIsDisplayed()
