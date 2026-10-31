@@ -81,6 +81,13 @@ class UiStateHolder(val runtime: EqRuntime) {
         _editSerial.update { it + 1 }
     }
 
+    /** Emits [text], stamping the current edit serial on it. Call under [lock], after [edited] for undoable ones. */
+    private fun emit(text: String, undoable: Boolean = false) {
+        val m = UiMessage(text, undoable)
+        m.serial = _editSerial.value
+        _messages.tryEmit(m)
+    }
+
     /** Number of curve computations performed (tests check conflation). */
     internal val curveComputations = AtomicInteger()
 
@@ -228,7 +235,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     fun addBandAt(freqHz: Float, gainDb: Float) = guarded {
         if (!freqHz.isFinite() || !gainDb.isFinite()) return@guarded
         if (controller.snapshot().bands.size >= ParametricMath.MAX_BANDS) {
-            _messages.tryEmit(UiMessage("All 16 bands are in use. Remove one to add another."))
+            emit("All 16 bands are in use. Remove one to add another.")
             return@guarded
         }
         edited()
@@ -454,7 +461,7 @@ class UiStateHolder(val runtime: EqRuntime) {
             })
         }
         republishLocked()
-        _messages.tryEmit(UiMessage("Band ${index + 1} deleted", undoable = true))
+        emit("Band ${index + 1} deleted", undoable = true)
     }
 
     /** Empties the band list in one undo step ("All bands removed", undoable). */
@@ -465,14 +472,14 @@ class UiStateHolder(val runtime: EqRuntime) {
         step { controller.edit { c -> repeat(n) { c.removeBand(0u) } } }
         _ui.update { it.copy(selectedBand = null) }
         republishLocked()
-        _messages.tryEmit(UiMessage("All bands removed", undoable = true))
+        emit("All bands removed", undoable = true)
     }
 
     /** Band list "Add band": a Peak, Q 1.00, 0 dB at the first free frequency, selected. One undo step. */
     fun addBandFromList() = guarded {
         val bands = controller.snapshot().bands
         if (bands.size >= ParametricMath.MAX_BANDS) {
-            _messages.tryEmit(UiMessage("All 16 bands are in use. Remove one to add another."))
+            emit("All 16 bands are in use. Remove one to add another.")
             return@guarded
         }
         val freq = ParametricMath.nextFreeFrequency(bands.map { it.freq to it.enabled })
@@ -573,7 +580,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     private fun emitToneHintIfNeeded() {
         val c = controller.snapshot()
         if (c.bassDb != 0f || c.trebleDb != 0f || c.balance != 0f) {
-            _messages.tryEmit(UiMessage(TONE_RESET_HINT))
+            emit(TONE_RESET_HINT)
         }
     }
 
@@ -590,7 +597,7 @@ class UiStateHolder(val runtime: EqRuntime) {
             edited()
             _ui.update { it.copy(selectedBand = null) }
             republishLocked()
-            _messages.tryEmit(UiMessage("Bands and preamp reset", undoable = true))
+            emit("Bands and preamp reset", undoable = true)
             return@guarded
         }
         val s = _ui.value
@@ -624,15 +631,15 @@ class UiStateHolder(val runtime: EqRuntime) {
             controller.edit { it.applyPreset(key) }
         } catch (e: EqException.NotFound) {
             republishLocked()
-            _messages.tryEmit(UiMessage(PresetNames.GONE))
+            emit(PresetNames.GONE)
             return@guarded
         }
         _ui.update { it.copy(selectedBand = null, lastTouchedBand = null) }
         republishLocked()
-        _messages.tryEmit(UiMessage("Applied $name", undoable = recorded))
+        emit("Applied $name", undoable = recorded)
     }
 
-    private fun existingPresetNames(): List<String> = _ui.value.presets.map { it.name }
+    private fun existingPresetNames(): List<String> = controller.snapshot().presets.map { it.name }
 
     /** Maps a preset core error to UI copy, or null when it is not one of the preset errors. */
     private fun presetErrorText(e: Exception): String? = when (e) {
@@ -672,13 +679,14 @@ class UiStateHolder(val runtime: EqRuntime) {
         val trimmed = name.trim()
         controller.edit { it.savePreset(trimmed) }
         republishLocked()
-        _messages.tryEmit(UiMessage("Saved $trimmed"))
+        emit("Saved $trimmed")
         PresetResult.Ok
     }
 
     /** Overwrites the active, modified user preset with the live sound. */
     fun savePreset(): PresetResult = presetOp {
-        val s = _ui.value
+        // Decide from the core's own state under the lock, not the last published UI copy.
+        val s = controller.snapshot()
         val key = s.activePresetKey
         val name = s.activePresetName
         if (key == null || name == null) return@presetOp PresetResult.Rejected(PresetNames.NOTHING_TO_SAVE)
@@ -686,13 +694,13 @@ class UiStateHolder(val runtime: EqRuntime) {
         if (!s.presetModified) return@presetOp PresetResult.Rejected(PresetNames.NOTHING_TO_SAVE)
         controller.edit { it.savePreset(name) }
         republishLocked()
-        _messages.tryEmit(UiMessage("Saved $name"))
+        emit("Saved $name")
         PresetResult.Ok
     }
 
     /** Renames a user preset; it stays active when it was. No message. */
     fun renamePreset(key: String, newName: String): PresetResult = presetOp {
-        val own = _ui.value.presets.firstOrNull { it.key == key }?.name
+        val own = controller.snapshot().presets.firstOrNull { it.key == key }?.name
         PresetNames.check(newName, existingPresetNames(), own)?.let { return@presetOp PresetResult.Rejected(it) }
         controller.edit { it.renamePreset(key, newName.trim()) }
         republishLocked()
@@ -702,13 +710,15 @@ class UiStateHolder(val runtime: EqRuntime) {
     /** Deletes a user preset; the sound is unchanged. Emits "Deleted <name>". */
     fun deletePreset(key: String): PresetResult {
         val r = presetOp {
-            val name = _ui.value.presets.firstOrNull { it.key == key }?.name
+            // Resolve the display name from the core before deleting; never show the raw key.
+            val name = controller.snapshot().presets.firstOrNull { it.key == key }?.name
+                ?: key.substringAfter(':')
             controller.edit { it.deletePreset(key) }
             republishLocked()
-            _messages.tryEmit(UiMessage("Deleted ${name ?: key}"))
+            emit("Deleted $name")
             PresetResult.Ok
         }
-        if (r is PresetResult.Rejected && r.message == PresetNames.GONE) _messages.tryEmit(UiMessage(PresetNames.GONE))
+        if (r is PresetResult.Rejected && r.message == PresetNames.GONE) synchronized(lock) { emit(PresetNames.GONE) }
         return r
     }
 
@@ -717,6 +727,15 @@ class UiStateHolder(val runtime: EqRuntime) {
         edited()
         controller.edit { it.undo() }
         republishLocked()
+    }
+
+    /**
+     * Undo for a snackbar action: a no-op unless no edit, undo or redo has happened since [serial], the edit
+     * serial stamped on the message that offered it (T-05-14).
+     */
+    fun undoIfUnchanged(serial: Int) = guarded {
+        if (_editSerial.value != serial) return@guarded
+        undo()
     }
 
     fun redo() = guarded {

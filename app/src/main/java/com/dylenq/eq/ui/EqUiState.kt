@@ -16,7 +16,15 @@ class CurvePoints(
 )
 
 /** A one-shot message for the screen's snackbar (for example the 16-band limit). */
-data class UiMessage(val text: String, val undoable: Boolean = false)
+data class UiMessage(val text: String, val undoable: Boolean = false) {
+    /**
+     * The holder's edit serial when the message was emitted (set under the holder lock), so an Undo action
+     * belongs to the edit that produced it even if another edit lands before the UI collects the message.
+     * Not part of equality.
+     */
+    var serial: Int = 0
+        internal set
+}
 
 /** Everything the screen renders. Immutable; the holder publishes a fresh copy per change. */
 @Immutable

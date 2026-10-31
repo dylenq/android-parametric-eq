@@ -594,4 +594,28 @@ class UiStateHolderTest {
         h.deletePreset("user:B")
         assertEquals(serial, h.editSerial.value)
     }
+
+    @Test fun undoableMessageCarriesItsEmitSerial_andUndoIfUnchangedIsANoOpAfterAnotherEdit() {
+        val h = newHolder()
+        val (got, scope) = collectMessages(h)
+        h.applyPreset("builtin:Bass")
+        waitFor(got, 1)
+        val serial = got[0].serial
+        assertEquals(h.editSerial.value, serial)
+        h.setPreamp(-4f) // a later edit bumps the serial
+        h.undoIfUnchanged(serial)
+        scope.cancel()
+        assertEquals("the stale Undo must not run", -4f, h.ui.value.preampDb)
+        assertEquals("builtin:Bass", h.ui.value.activePresetKey)
+    }
+
+    @Test fun deleteMessageShowsTheNameNotTheKey() {
+        val h = newHolder()
+        h.savePresetAs("Night")
+        val (got, scope) = collectMessages(h)
+        h.deletePreset("user:Night")
+        waitFor(got, 1)
+        scope.cancel()
+        assertEquals("Deleted Night", got[0].text)
+    }
 }

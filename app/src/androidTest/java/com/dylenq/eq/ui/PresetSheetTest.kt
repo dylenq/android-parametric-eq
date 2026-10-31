@@ -95,6 +95,17 @@ class PresetSheetTest {
         compose.waitUntil(3000) { chipText() == "Preset: none. Opens preset list" }
     }
 
+    @Test fun plainMessageDoesNotDismissAStillValidUndoSnackbar() {
+        launch()
+        holder.applyPreset("builtin:Bass")
+        compose.waitUntil(3000) { compose.onAllNodes(hasText("Applied Bass")).fetchSemanticsNodes().isNotEmpty() }
+        holder.savePresetAs("Mine") // plain "Saved Mine"; not an undo step, so Undo stays valid
+        compose.waitForIdle()
+        compose.onNodeWithText("Applied Bass").assertIsDisplayed()
+        compose.onNodeWithText("Undo").assertIsDisplayed()
+        compose.onAllNodes(hasText("Saved Mine")).assertCountEquals(0)
+    }
+
     // ----- Task 3: sheet interactions -----
 
     private fun descOf(tag: String): String =
