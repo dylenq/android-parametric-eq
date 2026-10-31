@@ -2,6 +2,22 @@
 
 All notable changes are listed here, in the style of Keep a Changelog.
 
+## Unreleased
+
+Not released yet. Everything below was checked on an Android 17 arm64 emulator only, not on a physical phone.
+
+### Added
+
+- Named presets: save the whole sound (mode, bands or sliders, preamp, bass, treble, balance), apply, rename and delete your own, with four built-in presets (Flat, Bass, Treble, Vocal) that cannot be edited. The title bar shows the active preset and an Edited marker. Applying a preset is one undo step.
+- Bass and treble shelf controls and a left/right balance control in a Tone & balance card.
+- Engine band probe: at start the app measures how many bands the phone's audio effect accepts and fits the curve to that grid. Settings shows the measured count.
+- Attaching the effect to an audio session retries briefly before it is reported as failed.
+
+### Known limitations
+
+- A state file written with presets and then opened by an older build drops the presets on that build's next save.
+- Preset behaviour was verified on an emulator only. The probe accepted the largest grid on the emulator, so a smaller grid was only exercised with a forced test setting.
+
 ## 0.1.0 - 2026-10-13
 
 First version. It has not been tested on a physical phone; every check ran on an Android 17 arm64 emulator.

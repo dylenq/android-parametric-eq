@@ -35,14 +35,17 @@ The screenshots come from an Android 17 arm64 emulator, not from a phone.
 
 - Graphic mode with 5, 10, 15 or 31 bands, and parametric mode with up to 16 bands. Drag the nodes on the curve, or type exact frequency, gain and Q values.
 - A preamp, with a suggested value when the curve would push the output over full scale, and a limiter that is on by default. The limiter eases sustained loud sections; it cannot catch short peaks.
+- Named presets. Save the whole sound (mode, graphic gains or parametric bands, preamp, bass, treble and balance) under a name, and apply it again later. Four built-in presets (Flat, Bass, Treble and Vocal) cannot be edited; you can rename and delete your own. The title bar shows the active preset, with an "Edited" marker once you change the sound. Applying a preset is one undo step.
+- Bass and treble shelf controls (plus or minus 12 dB) and a left/right balance control. Balance only turns the opposite channel down, down to a floor of -60 dB.
 - Undo and redo.
+- At start, EQ asks the phone how many bands its audio effect accepts and fits the curve to that grid, and it retries when attaching the effect fails for a moment.
 - A bypass switch in the app and in the notification.
 - Your settings are saved and restored.
 - An optional "Start when the phone turns on" setting (off by default).
 - Light and dark themes, and Material You dynamic colour on Android 12 or later.
 - A Settings screen that lists the audio sessions it has detected.
 
-There are no presets, per-device EQs or AutoEq imports in this version.
+Per-device or per-app EQs, and AutoEq or ParametricEQ.txt import and export, are not in this version.
 
 ## Install
 
@@ -79,6 +82,8 @@ Known limits:
 - The numeric keyboard has no "k", so type frequencies in Hz (for example 1500, not 1.5k). A comma is always read as a decimal separator.
 - Reset all in Parametric restores the default seven bands. "Remove all bands" empties the list.
 - The node long-press menu closes when you rotate the phone.
+- Presets, bass and treble, balance and the band-count probe were checked on the emulator only. The emulator accepted the largest grid the probe tries (512 bands), so the smaller-grid fit was exercised with a forced test setting, not on a phone that needs it. Balance was measured on the emulator with test tones, not heard on a phone.
+- A state file saved with presets and then opened by an older build drops the presets the next time that build saves.
 - The APK is not minified and is about 25 MB. See [docs/MINIFICATION.md](docs/MINIFICATION.md).
 - One service crash was seen once, about a second after Android restarted the service following a `kill -9`, and it could not be reproduced or explained in about 170 test restarts. It is not claimed fixed.
 
