@@ -1,6 +1,15 @@
 package com.dylenq.eq.ui
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Row
@@ -73,6 +82,7 @@ fun EqTopBar(
     onUndo: () -> Unit = {},
     onRedo: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onOpenPresets: () -> Unit = {},
     phase5Slot: @Composable RowScope.() -> Unit = {},
 ) {
     val s = state()
@@ -82,10 +92,15 @@ fun EqTopBar(
             .windowInsetsPadding(WindowInsets.statusBars)
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
             .height(heightDp.dp)
-            .padding(start = 16.dp, end = 4.dp),
+            .padding(start = 8.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("EQ", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        PresetChip(
+            name = s.activePresetName,
+            modified = s.presetModified,
+            onClick = onOpenPresets,
+            modifier = Modifier.weight(1f),
+        )
         phase5Slot()
         UndoRedoButtons(
             canUndo = s.canUndo,
@@ -100,6 +115,52 @@ fun EqTopBar(
                 s.bassDb != 0f || s.trebleDb != 0f || s.balance != 0f,
             onResetAll = onResetAll,
             onOpenSettings = onOpenSettings,
+        )
+    }
+}
+
+/**
+ * The preset title chip (09-UI-SPEC section 1): the active preset's name or "No preset", an Edited dot and a
+ * drop-down arrow. One line; the name ellipsizes first so the arrow, dot and the four 48 dp icons stay visible.
+ */
+@Composable
+private fun PresetChip(name: String?, modified: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val label = name ?: "No preset"
+    Row(
+        modifier
+            .heightIn(min = 48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(role = Role.Button, onClickLabel = "Choose a preset", onClick = onClick)
+            .padding(start = 8.dp, end = 4.dp)
+            .testTag("preset-chip")
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Preset: ${name ?: "none"}. Opens preset list"
+                if (modified) stateDescription = "Edited"
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.titleMedium,
+            color = if (name == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (modified) {
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                    .testTag("preset-edited-dot"),
+            )
+        }
+        Icon(
+            painterResource(R.drawable.ic_arrow_drop_down),
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(24.dp),
         )
     }
 }

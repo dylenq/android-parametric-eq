@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
@@ -113,6 +114,7 @@ fun EqScreen(
     val rootFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { runCatching { rootFocus.requestFocus() } }
     val reduced = rememberReducedMotion()
+    var presetsOpen by rememberSaveable { mutableStateOf(false) }
     val sliderScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
 
     val parametricActions = remember(holder) {
@@ -237,10 +239,12 @@ fun EqScreen(
             EqTopBar(
                 { ui }, holder::setBypass, resetAll, heightDp = spec.topBarHeightDp,
                 onUndo = holder::undo, onRedo = holder::redo, onOpenSettings = onOpenSettings,
+                onOpenPresets = { presetsOpen = true },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { pad ->
+        if (presetsOpen) PresetSheet(ui, holder, spec) { presetsOpen = false }
         val margin = spec.marginDp.dp
         if (!spec.twoPane) {
             BoxWithConstraints(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
