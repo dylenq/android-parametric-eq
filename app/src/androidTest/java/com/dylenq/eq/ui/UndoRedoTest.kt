@@ -125,7 +125,7 @@ class UndoRedoTest {
         compose.onNodeWithTag("redo").assertContentDescriptionEquals("Redo")
     }
 
-    @Test fun fourActionsFitAt360DpWithoutTruncatingTitle() {
+    @Test fun fourActionsFitAt360DpWithoutTruncatingPresetChip() {
         launch(EqMode.GRAPHIC)
         compose.runOnIdle { }
         rule.host {
@@ -134,12 +134,13 @@ class UndoRedoTest {
         }
         compose.waitForIdle()
         val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
-        val title = compose.onNodeWithText("EQ").fetchSemanticsNode().boundsInRoot
+        // Phase 9 replaced the "EQ" title with the preset chip.
+        val title = compose.onNodeWithTag("preset-chip").fetchSemanticsNode().boundsInRoot
         val undo = compose.onNodeWithTag("undo").fetchSemanticsNode().boundsInRoot
         val d = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
         assertTrue("title inside the root", title.left >= root.left && title.right <= root.right)
         assertTrue("title ends before Undo starts: ${title.right} vs ${undo.left}", title.right <= undo.left)
-        assertTrue("title is wide enough for EQ: ${title.width / d} dp", title.width / d >= 20f)
+        assertTrue("chip is wide enough: ${title.width / d} dp", title.width / d >= 48f)
     }
 
     @Test fun overflowListsResetAllThenSettingsAndSettingsIsOpened() {

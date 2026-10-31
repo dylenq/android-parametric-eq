@@ -22,10 +22,15 @@ import kotlinx.coroutines.launch
 @Composable
 fun EqMessageSnackbars(holder: UiStateHolder, host: SnackbarHostState) {
     LaunchedEffect(holder, host) {
+        // Cancelling the previous show removes its snackbar, so a newer message really replaces it. Without
+        // this the host queued messages behind the visible one while their 4 s timers ran, and a message
+        // emitted in a burst (for example "Deleted" then "That preset no longer exists.") could be lost.
+        var shown: kotlinx.coroutines.Job? = null
         holder.messages.collect { msg ->
+            shown?.cancel()
             // The holder bumps editSerial before emitting, so the serial read here belongs to the action.
             val serial = holder.editSerial.value
-            launch {
+            shown = launch {
                 host.showTimed(
                     msg.text,
                     if (msg.undoable) RESET_SNACKBAR_MS else ERROR_SNACKBAR_MS,
