@@ -6,30 +6,37 @@
 
 **A system-wide equalizer for other apps' audio on a stock Android phone.**
 
-Download the APK from the project's GitHub Releases page (not published yet, see [docs/RELEASING.md](docs/RELEASING.md)). Android 9 or later (minSdk 28). arm64-v8a, armeabi-v7a and x86_64.
+Download the APK from the [Releases page](https://github.com/dylenq/android-parametric-eq/releases/latest). Android 9 or later (minSdk 28). arm64-v8a, armeabi-v7a and x86_64.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-graphic-dark.png">
-  <img src="docs/screenshot-graphic-light.png" width="320" alt="The Graphic mode: ten vertical gain sliders under a curve, preamp at -6 dB, limiter on">
+  <img src="docs/screenshot-graphic-light.png" width="320" alt="The Graphic mode with the My headphones preset active: ten vertical gain sliders under a curve, preamp at -8.5 dB, limiter on">
 </picture>
 
 </div>
 
 EQ shapes the sound of other apps with Android's `DynamicsProcessing` audio effect. You draw a curve, and the effect is attached to the audio sessions of the apps that announce one. It needs no root, no account and no network access.
 
-It has a graphic mode (5, 10, 15 or 31 bands, plus or minus 12 dB per slider) and a parametric mode (up to 16 bands: peak, low shelf, high shelf, low pass and high pass, with frequency, gain up to plus or minus 24 dB, and Q). Both modes share a preamp (down to -24 dB) and a limiter.
+It has a graphic mode (5, 10, 15 or 31 bands, plus or minus 12 dB per slider) and a parametric mode (up to 16 bands: peak, low shelf, high shelf, low pass and high pass, with frequency, gain up to plus or minus 24 dB, and Q). Both modes share a preamp (down to -24 dB), a limiter, bass and treble controls, a left/right balance, and named presets.
 
 <div align="center">
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-parametric-dark.png">
-  <img src="docs/screenshot-parametric-light.png" width="320" alt="The Parametric mode: a curve with draggable band nodes and a list of bands below">
+  <img src="docs/screenshot-parametric-light.png" width="320" alt="The Parametric mode with the Desk speakers preset active: a curve with draggable band nodes and a list of bands below">
 </picture>
-<img src="docs/screenshot-settings.png" width="320" alt="Settings: global mode, start when the phone turns on, detected audio sessions, version 0.1.0">
+<img src="docs/screenshot-settings.png" width="320" alt="Settings: global mode, start when the phone turns on, detected audio sessions, engine bands 512 (measured), version 0.2.0">
 
 </div>
 
-The screenshots come from an Android 17 arm64 emulator, not from a phone.
+<div align="center">
+
+<img src="docs/screenshot-presets.png" width="320" alt="The preset list: Save and Save as new buttons, the built-in Flat, Bass, Treble and Vocal presets, and three of your own presets with My headphones checked">
+<img src="docs/screenshot-tone.png" width="320" alt="The Tone and balance card: bass +4.5 dB, treble -3.0 dB, balance R 30, under the preamp and limiter">
+
+</div>
+
+The screenshots come from an Android 17 arm64 emulator. `spike-tools/readme-screens.sh` retakes them.
 
 ## Features
 
@@ -69,7 +76,7 @@ The effect works on blocks of audio. EQ uses an 85.3 ms block so that narrow fil
 
 ## Limits and what is not verified
 
-Everything here was checked on one Android 17 arm64 emulator only. Nothing has been tested on a physical phone, and no real player (Spotify, YouTube and so on) has been tested. The list below says what is known to be off and what has never been tried.
+The checks below ran on one Android 17 arm64 emulator. The author has also installed 0.2.0 on one phone and used it without problems, but no structured tests were run on a physical phone, and no real player (Spotify, YouTube and so on) has been tested systematically. The list below says what is known to be off and what has not been checked.
 
 Known limits:
 
@@ -87,16 +94,16 @@ Known limits:
 - The APK is not minified and is about 25 MB. See [docs/MINIFICATION.md](docs/MINIFICATION.md).
 - One service crash was seen once, about a second after Android restarted the service following a `kill -9`, and it could not be reproduced or explained in about 170 test restarts. It is not claimed fixed.
 
-Never tried (not verified, none marked as passed):
+Not checked (none marked as passed):
 
-- Any physical phone: sound, battery use, background limits set by phone makers, restart behaviour, and whether the notification appears when you deny the notification permission.
+- Physical phones beyond the author's own everyday use: measured sound, battery use, background limits set by phone makers, restart behaviour, and whether the notification appears when you deny the notification permission.
 - Real players: whether they announce an audio session, and when.
 - Global mode: whether it is audible, and whether real phones accept it.
 - Start on boot after a real restart, including a phone with a lock screen set.
 - Changing the output (Bluetooth, headphones) or the sample rate while playing.
 - The themed (monochrome) app icon, TalkBack, the reduced-motion setting, dynamic colour with real wallpapers, touch and haptic feel, and different keyboards.
 - Devices on Android 9 to 11 (the fallback colours were checked in code only).
-- The release workflow in `.github/workflows/release.yml` has never run (see Releasing below), and a build signed with a real release key has not been made.
+- The release workflow in `.github/workflows/release.yml` has never completed a run (see Releasing below), and a build signed with a real release key has not been made.
 
 ## Privacy
 
@@ -133,7 +140,7 @@ A real release needs your own keystore. Create one with `scripts/create-keystore
 
 ### Releasing
 
-The steps to publish are in [docs/RELEASING.md](docs/RELEASING.md). The GitHub workflow in `.github/workflows/release.yml` has never run. It was checked statically only, and it creates a draft release.
+The steps to publish are in [docs/RELEASING.md](docs/RELEASING.md). The GitHub workflow in `.github/workflows/release.yml` has never completed a run: it needs the release-key secrets, which are not set up yet. Release 0.2.0 was published by hand with the test-signed APK. When it does run, the workflow creates a draft release.
 
 ## License
 

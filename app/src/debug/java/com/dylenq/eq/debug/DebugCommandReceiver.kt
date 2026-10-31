@@ -54,6 +54,11 @@ class DebugCommandReceiver : BroadcastReceiver() {
                 "set-global" -> rt.setGlobalMode(on(intent))
                 "set-max-bands" -> rt.overrideEngineBandCap(intent.getIntExtra("value", -1).takeIf { it > 0 })
                 "set-start-on-boot" -> rt.setStartOnBoot(on(intent))
+                // Preset keys are "builtin:<name>" or "user:<name>". These skip the UI's name checks.
+                "save-preset" -> c.edit { it.savePreset(intent.getStringExtra("name") ?: "") }
+                "apply-preset" -> c.edit { it.applyPreset(intent.getStringExtra("key") ?: "") }
+                "delete-preset" -> c.edit { it.deletePreset(intent.getStringExtra("key") ?: "") }
+                "flush" -> rt.flush()  // write pending state now, before a script force-stops the app
                 else -> Log.i(TAG, "unknown debug command: $cmd")
             }
         } catch (t: Throwable) {

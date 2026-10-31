@@ -9,7 +9,7 @@ fail() { echo "FAIL: $*"; FAILS=$((FAILS + 1)); }
 has() { grep -qF -- "$2" "$1"; }
 
 [ -f README.md ] || { echo "FAIL: README.md missing"; exit 1; }
-for w in "Install" "Limits" "Privacy" "Build from source" "License" "GPL-3.0" "never run" "85 ms" "physical phone" "global mode"; do
+for w in "Install" "Limits" "Privacy" "Build from source" "License" "GPL-3.0" "never completed a run" "85 ms" "physical phone" "global mode"; do
   if grep -qi -- "$w" README.md; then pass "README mentions '$w'"; else fail "README mentions '$w'"; fi
 done
 
@@ -18,7 +18,7 @@ for i in $IMGS; do
   case "$i" in http*) continue ;; esac
   if [ -f "$i" ]; then pass "image exists: $i"; else fail "image exists: $i"; fi
 done
-for n in graphic-light graphic-dark parametric-light parametric-dark settings; do
+for n in graphic-light graphic-dark parametric-light parametric-dark settings presets tone; do
   has README.md "docs/screenshot-$n.png" && pass "README references screenshot-$n" || fail "README references screenshot-$n"
 done
 has README.md "docs/icon-512.png" && pass "README references the icon" || fail "README references the icon"

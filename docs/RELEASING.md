@@ -2,7 +2,7 @@
 
 Nothing has been published. No keystore exists, no GitHub repository exists, no remote is configured and no tag has been created. These are the steps for you to publish.
 
-The GitHub workflow in `.github/workflows/release.yml` has never run. It was checked statically only (the YAML parses, and `scripts/check-workflow.sh` confirms pinning, permissions and that no secret appears inside a `run:` block). Its first real run may fail for reasons nobody could see in advance, such as the Android command line tools path on the runner image, or how long `cargo install cargo-ndk` takes. It creates a draft release, so nothing becomes public until you press publish.
+The GitHub workflow in `.github/workflows/release.yml` has never completed a run. It was checked statically only (the YAML parses, and `scripts/check-workflow.sh` confirms pinning, permissions and that no secret appears inside a `run:` block). Its first real run may fail for reasons nobody could see in advance, such as the Android command line tools path on the runner image, or how long `cargo install cargo-ndk` takes. It creates a draft release, so nothing becomes public until you press publish.
 
 Pinning: `actions/checkout`, `actions/setup-java`, `gradle/actions/setup-gradle` and `softprops/action-gh-release` are pinned to full commit SHAs, each with a comment naming the release tag. The two annotated tags (gradle/actions v6.4.0 and softprops/action-gh-release v3.0.3) are pinned to the commit the tag points at. `Swatinem/rust-cache` is not used.
 
@@ -116,7 +116,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-13. Watch the workflow run in the Actions tab. If it fails, fix the cause and delete and re-push the tag; remember it has never run. When it succeeds it leaves a draft release with `EQ-0.1.0.apk`. Download that APK, run `apksigner verify --print-certs` on it (`apksigner` is in the Android SDK under `build-tools/36.0.0/`) and compare the fingerprint with step 5, then publish the draft.
+13. Watch the workflow run in the Actions tab. If it fails, fix the cause and delete and re-push the tag; remember it has never completed a run. When it succeeds it leaves a draft release with `EQ-0.1.0.apk`. Download that APK, run `apksigner verify --print-certs` on it (`apksigner` is in the Android SDK under `build-tools/36.0.0/`) and compare the fingerprint with step 5, then publish the draft.
 
 ## Decision for you at publish time
 
