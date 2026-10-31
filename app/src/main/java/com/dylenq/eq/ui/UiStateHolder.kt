@@ -296,7 +296,7 @@ class UiStateHolder(val runtime: EqRuntime) {
         val v = db.coerceIn(PREAMP_MIN_DB, PREAMP_MAX_DB)
         controller.edit { it.setPreamp(v) }
         _ui.update { it.copy(preampDb = v) }
-        refreshCurve()
+        if (gestureDepth == 0) republishLocked() else refreshCurve()
     }
 
     fun preampDragStart() = guarded {
