@@ -116,6 +116,98 @@ class PersistenceTest {
         }
     }
 
+    /**
+     * Presets, the active key and the Edited state across a restart. Process death is simulated by
+     * reopening the same state directory in a second [EqRuntime]; the process itself is not killed.
+     */
+    @Test fun presetsAndActiveMarkerSurviveANewRuntimeOnTheSameState() {
+        rule.launch()
+        compose.waitForIdle()
+        holder.setMode(EqMode.PARAMETRIC)
+        ctrl.edit {
+            it.setBass(2.5f)
+            it.setTreble(-1.5f)
+            it.setBalance(-0.4f)
+        }
+        assertEquals(PresetResult.Ok, holder.savePresetAs("Night"))
+        holder.setPreamp(-2f)
+        holder.applyPreset("user:Night")
+        holder.setPreamp(-5f)
+        compose.waitForIdle()
+        val before = holder.ui.value
+        assertTrue(before.presetModified)
+        rule.runtime.flush()
+
+        val second = EqRuntime(FakeEffectFactory(), rule.runtimeRule.dir, SettingsStore(null))
+        try {
+            val h2 = UiStateHolder(second)
+            try {
+                val s = runBlocking { withTimeout(5000) { h2.ui.first { true } } }
+                val keys = s.presets.map { it.key }
+                assertEquals(listOf("builtin:Flat", "builtin:Bass", "builtin:Treble", "builtin:Vocal", "user:Night"), keys)
+                assertEquals("user:Night", s.activePresetKey)
+                assertEquals("Night", s.activePresetName)
+                assertTrue("Edited state survives", s.presetModified)
+                assertEquals(EqMode.PARAMETRIC, s.mode)
+                assertEquals(2.5f, s.bassDb, 0.001f)
+                assertEquals(-1.5f, s.trebleDb, 0.001f)
+                assertEquals(-0.4f, s.balance, 0.001f)
+                assertEquals(-5f, s.preampDb, 0f)
+                assertEquals(before.bands, s.bands)
+            } finally {
+                h2.close()
+            }
+        } finally {
+            second.shutdown()
+        }
+    }
+
+    @Test fun applyingASavedPresetAfterReloadRestoresEveryFieldAndClearsEdited() {
+        rule.launch()
+        compose.waitForIdle()
+        holder.setMode(EqMode.PARAMETRIC)
+        ctrl.edit {
+            it.setBass(2.5f)
+            it.setTreble(-1.5f)
+            it.setBalance(-0.4f)
+        }
+        holder.setPreamp(-2f)
+        assertEquals(PresetResult.Ok, holder.savePresetAs("Night"))
+        val saved = holder.ui.value
+        // Change everything, then flush and reopen (same simulated restart as above).
+        holder.setMode(EqMode.GRAPHIC)
+        ctrl.edit {
+            it.setBass(0f)
+            it.setTreble(0f)
+            it.setBalance(0f)
+        }
+        holder.setPreamp(0f)
+        rule.runtime.flush()
+
+        val second = EqRuntime(FakeEffectFactory(), rule.runtimeRule.dir, SettingsStore(null))
+        try {
+            val h2 = UiStateHolder(second)
+            try {
+                runBlocking { withTimeout(5000) { h2.ui.first { true } } }
+                h2.applyPreset("user:Night")
+                val s = h2.ui.value
+                assertEquals("user:Night", s.activePresetKey)
+                assertFalse("applied, not edited", s.presetModified)
+                assertEquals(saved.mode, s.mode)
+                assertEquals(saved.bassDb, s.bassDb, 0.001f)
+                assertEquals(saved.trebleDb, s.trebleDb, 0.001f)
+                assertEquals(saved.balance, s.balance, 0.001f)
+                assertEquals(saved.preampDb, s.preampDb, 0f)
+                assertEquals(saved.bands, s.bands)
+                assertEquals(saved.graphicGainsDb, s.graphicGainsDb)
+            } finally {
+                h2.close()
+            }
+        } finally {
+            second.shutdown()
+        }
+    }
+
     @Test fun rotationKeepsBandCountModeValuesAndScrollPosition() {
         val scenario = rule.launch()
         compose.waitForIdle()
