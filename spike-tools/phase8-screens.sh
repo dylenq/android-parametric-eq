@@ -8,7 +8,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/spike-tools/env.sh"
 source "$ROOT/spike-tools/phase3-lib.sh"
 cd "$ROOT"
-OUT="${OUT:-$ROOT/.planning/phases/08-tone-and-balance/evidence}"
+OUT="${OUT:-$ROOT/.planning/milestones/v0.2-phases/08-tone-and-balance/evidence}"
 mkdir -p "$OUT"
 
 bash "$ROOT/spike-tools/emulator-up.sh"
