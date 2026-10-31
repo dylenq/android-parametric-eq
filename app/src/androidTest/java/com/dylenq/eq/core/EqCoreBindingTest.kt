@@ -191,4 +191,20 @@ class EqCoreBindingTest {
             assertEquals(1, dirty)
         }
     }
+
+    @Test
+    fun snapshot_exposes_presets_and_apply_returns_boolean() {
+        EqCore().use { core ->
+            val snap = core.snapshot()
+            assertEquals(listOf("Flat", "Bass", "Treble", "Vocal"), snap.presets.take(4).map { it.name })
+            assertTrue(snap.presets.take(4).all { it.builtin })
+            assertEquals(null, snap.activePresetKey)
+            assertEquals(null, snap.activePresetName)
+            assertFalse(snap.presetModified)
+            assertTrue(core.applyPreset("builtin:Bass"))
+            assertEquals("builtin:Bass", core.snapshot().activePresetKey)
+            assertEquals("Bass", core.snapshot().activePresetName)
+            assertFalse(core.applyPreset("builtin:Bass"))
+        }
+    }
 }

@@ -409,4 +409,189 @@ class UiStateHolderTest {
         h.setTreble(-99f)
         assertEquals(-12f, ctrl.snapshot().trebleDb, 0f)
     }
+
+    // ---- presets ---------------------------------------------------------------------------
+
+    /** Collects holder messages; call [collectMessages] before the action under test. */
+    private fun collectMessages(h: UiStateHolder): Pair<CopyOnWriteArrayList<UiMessage>, CoroutineScope> {
+        val got = CopyOnWriteArrayList<UiMessage>()
+        val ready = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(Dispatchers.Default)
+        scope.launch { h.messages.onSubscription { ready.complete(Unit) }.collect { got.add(it) } }
+        runBlocking { withTimeout(2000) { ready.await() } }
+        return got to scope
+    }
+
+    private fun waitFor(got: List<UiMessage>, n: Int) {
+        val end = System.currentTimeMillis() + 2000
+        while (got.size < n && System.currentTimeMillis() < end) Thread.sleep(10)
+    }
+
+    @Test fun freshStateListsBuiltIns() {
+        val s = newHolder().ui.value
+        assertEquals(listOf("Flat", "Bass", "Treble", "Vocal"), s.presets.take(4).map { it.name })
+        assertTrue(s.presets.take(4).all { it.builtin })
+        assertNull(s.activePresetKey)
+        assertFalse(s.presetModified)
+    }
+
+    @Test fun applyPreset_emitsAppliedWithUndo() {
+        val h = newHolder()
+        val (got, scope) = collectMessages(h)
+        h.applyPreset("builtin:Bass")
+        waitFor(got, 1)
+        scope.cancel()
+        assertEquals(listOf(UiMessage("Applied Bass", undoable = true)), got.toList())
+        val s = h.ui.value
+        assertEquals("Bass", s.activePresetName)
+        assertEquals(EqMode.GRAPHIC, s.mode)
+        assertEquals(6f, s.graphicGainsDb[0], 1e-4f)
+        assertNull(s.selectedBand)
+    }
+
+    @Test fun applyPreset_undoRestoresMode() {
+        val h = newHolder()
+        h.setMode(EqMode.PARAMETRIC)
+        h.applyPreset("builtin:Bass")
+        assertEquals(EqMode.GRAPHIC, h.ui.value.mode)
+        h.undo()
+        assertEquals(EqMode.PARAMETRIC, h.ui.value.mode)
+        assertNull(h.ui.value.activePresetKey)
+        assertEquals(0f, h.ui.value.graphicGainsDb[0], 1e-4f)
+    }
+
+    @Test fun applyPreset_sameTwice_isNotUndoable() {
+        val h = newHolder()
+        h.applyPreset("builtin:Bass")
+        val (got, scope) = collectMessages(h)
+        val undoBefore = h.ui.value.canUndo
+        h.applyPreset("builtin:Bass")
+        waitFor(got, 1)
+        scope.cancel()
+        assertEquals(listOf(UiMessage("Applied Bass", undoable = false)), got.toList())
+        assertEquals(undoBefore, h.ui.value.canUndo)
+    }
+
+    @Test fun applyPreset_inertDuringGesture() {
+        val h = newHolder()
+        h.onBandDragStart(2)
+        h.applyPreset("builtin:Bass")
+        assertNull(h.ui.value.activePresetKey)
+        h.onBandDragEnd()
+        assertNull(ctrl.snapshot().activePresetKey)
+    }
+
+    @Test fun savePresetAs_activatesAndEmitsWithoutBumpingSerial() {
+        val h = newHolder()
+        h.setBass(2f)
+        val serial = h.editSerial.value
+        val (got, scope) = collectMessages(h)
+        assertEquals(PresetResult.Ok, h.savePresetAs("  Night "))
+        waitFor(got, 1)
+        scope.cancel()
+        assertEquals(listOf(UiMessage("Saved Night")), got.toList())
+        assertEquals("Night", h.ui.value.activePresetName)
+        assertFalse(h.ui.value.presetModified)
+        assertEquals(serial, h.editSerial.value)
+        assertTrue(h.ui.value.presets.any { it.name == "Night" && !it.builtin })
+    }
+
+    @Test fun savePresetAs_duplicateIsRejectedWithoutOverwrite() {
+        val h = newHolder()
+        h.setBass(2f)
+        h.savePresetAs("Night")
+        h.setBass(5f)
+        assertEquals(PresetResult.Rejected(PresetNames.NAME_TAKEN), h.savePresetAs("night"))
+        assertEquals(PresetResult.Rejected(PresetNames.NAME_TAKEN), h.savePresetAs("bass"))
+        assertEquals(PresetResult.Rejected(PresetNames.NAME_BLANK), h.savePresetAs("  "))
+        assertEquals(PresetResult.Rejected(PresetNames.NAME_INVALID), h.savePresetAs("x".repeat(41)))
+        assertTrue(h.ui.value.presetModified)
+        assertEquals(1, h.ui.value.presets.count { it.name == "Night" })
+    }
+
+    @Test fun savePreset_overwritesActiveUserPreset() {
+        val h = newHolder()
+        h.setBass(2f)
+        h.savePresetAs("Night")
+        h.setBass(5f)
+        assertTrue(h.ui.value.presetModified)
+        val serial = h.editSerial.value
+        val (got, scope) = collectMessages(h)
+        assertEquals(PresetResult.Ok, h.savePreset())
+        waitFor(got, 1)
+        scope.cancel()
+        assertEquals(listOf(UiMessage("Saved Night")), got.toList())
+        assertFalse(h.ui.value.presetModified)
+        assertEquals(serial, h.editSerial.value)
+    }
+
+    @Test fun savePreset_noOpForBuiltInOrNone() {
+        val h = newHolder()
+        assertTrue(h.savePreset() is PresetResult.Rejected)
+        h.applyPreset("builtin:Bass")
+        h.setBass(3f)
+        assertEquals(PresetResult.Rejected(PresetNames.READ_ONLY), h.savePreset())
+    }
+
+    @Test fun renamePreset_keepsActiveAndStaysSilent() {
+        val h = newHolder()
+        h.setBass(2f)
+        h.savePresetAs("Night")
+        val (got, scope) = collectMessages(h)
+        assertEquals(PresetResult.Ok, h.renamePreset("user:Night", "Day"))
+        Thread.sleep(150)
+        scope.cancel()
+        assertTrue(got.isEmpty())
+        assertEquals("Day", h.ui.value.activePresetName)
+        assertEquals(PresetResult.Rejected(PresetNames.NAME_TAKEN), h.renamePreset("user:Day", "Flat"))
+        assertEquals(PresetResult.Ok, h.renamePreset("user:Day", "DAY"))
+    }
+
+    @Test fun renamePreset_staleKeyIsRejected() {
+        val h = newHolder()
+        assertEquals(PresetResult.Rejected(PresetNames.GONE), h.renamePreset("user:Ghost", "Whatever"))
+    }
+
+    @Test fun deletePreset_activeLeavesSoundUnchanged() {
+        val h = newHolder()
+        h.setBass(2f)
+        h.savePresetAs("Night")
+        val before = ctrl.engineParams(48000u, 85.3f)
+        val serial = h.editSerial.value
+        val (got, scope) = collectMessages(h)
+        assertEquals(PresetResult.Ok, h.deletePreset("user:Night"))
+        waitFor(got, 1)
+        scope.cancel()
+        assertEquals(listOf(UiMessage("Deleted Night")), got.toList())
+        assertNull(h.ui.value.activePresetKey)
+        assertEquals(before, ctrl.engineParams(48000u, 85.3f))
+        assertEquals(serial, h.editSerial.value)
+    }
+
+    @Test fun stalePreset_applyAndDeleteShowGoneMessageWithoutCrash() {
+        val h = newHolder()
+        val (got, scope) = collectMessages(h)
+        h.applyPreset("user:Ghost")
+        waitFor(got, 1)
+        assertEquals(UiMessage(PresetNames.GONE), got[0])
+        assertTrue(h.deletePreset("user:Ghost") is PresetResult.Rejected)
+        waitFor(got, 2)
+        scope.cancel()
+        assertEquals(UiMessage(PresetNames.GONE), got[1])
+    }
+
+    @Test fun deletingBuiltInIsReadOnly() {
+        val h = newHolder()
+        assertEquals(PresetResult.Rejected(PresetNames.READ_ONLY), h.deletePreset("builtin:Bass"))
+    }
+
+    @Test fun presetSaveRenameDelete_doNotInvalidateAppliedSnackbar() {
+        val h = newHolder()
+        h.applyPreset("builtin:Bass")
+        val serial = h.editSerial.value
+        h.savePresetAs("A")
+        h.renamePreset("user:A", "B")
+        h.deletePreset("user:B")
+        assertEquals(serial, h.editSerial.value)
+    }
 }

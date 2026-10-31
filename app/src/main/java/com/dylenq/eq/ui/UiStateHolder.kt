@@ -72,6 +72,8 @@ class UiStateHolder(val runtime: EqRuntime) {
     /**
      * Counts user edits (every graphic/preamp/bass/treble/balance/mode/band-count/limiter/bypass change, reset, undo and redo).
      * The Reset all snackbar watches it so its Undo can never undo a later, unrelated edit.
+     * A preset apply is an undo step and bumps it; preset save, save-as, rename and delete are not
+     * undo steps and do not, so a visible "Applied" Undo snackbar survives them.
      */
     val editSerial: StateFlow<Int> = _editSerial.asStateFlow()
 
@@ -610,6 +612,106 @@ class UiStateHolder(val runtime: EqRuntime) {
         republishLocked()
     }
 
+    /**
+     * Applies preset [key] as one undo step ("Applied <name>", with Undo only when the core recorded a step).
+     * Inert while a gesture is open. A stale key shows "That preset no longer exists.".
+     */
+    fun applyPreset(key: String) = guarded {
+        if (gestureDepth > 0) return@guarded
+        val name = _ui.value.presets.firstOrNull { it.key == key }?.name ?: key
+        edited()
+        val recorded = try {
+            controller.edit { it.applyPreset(key) }
+        } catch (e: EqException.NotFound) {
+            republishLocked()
+            _messages.tryEmit(UiMessage(PresetNames.GONE))
+            return@guarded
+        }
+        _ui.update { it.copy(selectedBand = null, lastTouchedBand = null) }
+        republishLocked()
+        _messages.tryEmit(UiMessage("Applied $name", undoable = recorded))
+    }
+
+    private fun existingPresetNames(): List<String> = _ui.value.presets.map { it.name }
+
+    /** Maps a preset core error to UI copy, or null when it is not one of the preset errors. */
+    private fun presetErrorText(e: Exception): String? = when (e) {
+        is EqException.NameTaken -> PresetNames.NAME_TAKEN
+        is EqException.InvalidName -> PresetNames.NAME_INVALID
+        is EqException.NotFound -> PresetNames.GONE
+        is EqException.ReadOnly -> PresetNames.READ_ONLY
+        is EqException.TooManyPresets -> PresetNames.TOO_MANY
+        else -> null
+    }
+
+    /**
+     * Runs a preset persistence operation under the lock. Preset errors become [PresetResult.Rejected];
+     * anything else falls back to the generic failure. Never calls edited(): these are not undo steps.
+     */
+    private inline fun presetOp(block: () -> PresetResult): PresetResult {
+        try {
+            return synchronized(lock) {
+                try {
+                    block()
+                } catch (e: EqException) {
+                    val text = presetErrorText(e) ?: throw e
+                    republishLocked()
+                    PresetResult.Rejected(text)
+                }
+            }
+        } catch (e: Exception) {
+            if (!isCoreFailure(e)) throw e
+            fail()
+            return PresetResult.Rejected("Couldn't apply that change.")
+        }
+    }
+
+    /** Saves the live sound as a new user preset named [name] and makes it active. Never overwrites. */
+    fun savePresetAs(name: String): PresetResult = presetOp {
+        PresetNames.check(name, existingPresetNames())?.let { return@presetOp PresetResult.Rejected(it) }
+        val trimmed = name.trim()
+        controller.edit { it.savePreset(trimmed) }
+        republishLocked()
+        _messages.tryEmit(UiMessage("Saved $trimmed"))
+        PresetResult.Ok
+    }
+
+    /** Overwrites the active, modified user preset with the live sound. */
+    fun savePreset(): PresetResult = presetOp {
+        val s = _ui.value
+        val key = s.activePresetKey
+        val name = s.activePresetName
+        if (key == null || name == null) return@presetOp PresetResult.Rejected(PresetNames.NOTHING_TO_SAVE)
+        if (!key.startsWith("user:")) return@presetOp PresetResult.Rejected(PresetNames.READ_ONLY)
+        if (!s.presetModified) return@presetOp PresetResult.Rejected(PresetNames.NOTHING_TO_SAVE)
+        controller.edit { it.savePreset(name) }
+        republishLocked()
+        _messages.tryEmit(UiMessage("Saved $name"))
+        PresetResult.Ok
+    }
+
+    /** Renames a user preset; it stays active when it was. No message. */
+    fun renamePreset(key: String, newName: String): PresetResult = presetOp {
+        val own = _ui.value.presets.firstOrNull { it.key == key }?.name
+        PresetNames.check(newName, existingPresetNames(), own)?.let { return@presetOp PresetResult.Rejected(it) }
+        controller.edit { it.renamePreset(key, newName.trim()) }
+        republishLocked()
+        PresetResult.Ok
+    }
+
+    /** Deletes a user preset; the sound is unchanged. Emits "Deleted <name>". */
+    fun deletePreset(key: String): PresetResult {
+        val r = presetOp {
+            val name = _ui.value.presets.firstOrNull { it.key == key }?.name
+            controller.edit { it.deletePreset(key) }
+            republishLocked()
+            _messages.tryEmit(UiMessage("Deleted ${name ?: key}"))
+            PresetResult.Ok
+        }
+        if (r is PresetResult.Rejected && r.message == PresetNames.GONE) _messages.tryEmit(UiMessage(PresetNames.GONE))
+        return r
+    }
+
     fun undo() = guarded {
         if (gestureDepth > 0) return@guarded
         edited()
@@ -718,6 +820,10 @@ class UiStateHolder(val runtime: EqRuntime) {
                 trebleDb = snap.trebleDb,
                 balance = snap.balance,
                 limiterEnabled = snap.limiterEnabled,
+                presets = snap.presets.toList(),
+                activePresetKey = snap.activePresetKey,
+                activePresetName = snap.activePresetName,
+                presetModified = snap.presetModified,
                 canUndo = snap.canUndo,
                 canRedo = snap.canRedo,
                 bypass = st.bypass,
@@ -730,6 +836,12 @@ class UiStateHolder(val runtime: EqRuntime) {
             )
         }
     }
+}
+
+/** Outcome of a preset save, rename or delete; [Rejected] carries the exact UI-SPEC copy for the dialog. */
+sealed interface PresetResult {
+    data object Ok : PresetResult
+    data class Rejected(val message: String) : PresetResult
 }
 
 /** Shown by Reset all when only tone or balance is non-default. */

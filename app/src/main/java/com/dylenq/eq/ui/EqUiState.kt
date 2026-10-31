@@ -3,6 +3,7 @@ package com.dylenq.eq.ui
 import androidx.compose.runtime.Immutable
 import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.EqMode
+import com.dylenq.eq.core.PresetInfo
 
 /** One response curve sampled on a log-frequency grid (dB per point). */
 @Immutable
@@ -54,6 +55,13 @@ data class EqUiState(
     val draggingBand: Int? = null,
     /** The band shown in the ReadoutBar; cleared when the band count changes. */
     val lastTouchedBand: Int? = null,
+
+    /** Built-ins first, then user presets in saved order. */
+    val presets: List<PresetInfo> = emptyList(),
+    val activePresetKey: String? = null,
+    val activePresetName: String? = null,
+    /** True when the active preset's curve no longer matches the live sound (the Edited marker). */
+    val presetModified: Boolean = false,
 
     val serviceRunning: Boolean = false,
     val sessionCount: Int = 0,
