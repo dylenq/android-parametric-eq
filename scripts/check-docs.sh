@@ -25,10 +25,11 @@ has README.md "docs/icon-512.png" && pass "README references the icon" || fail "
 
 if grep -rIl "0.0.1-spike" README.md docs CHANGELOG.md >/dev/null 2>&1; then fail "no 0.0.1-spike in README/docs/CHANGELOG"; else pass "no 0.0.1-spike in README/docs/CHANGELOG"; fi
 if grep -rIlP "\x{2014}" README.md docs CHANGELOG.md >/dev/null 2>&1 || grep -rIl $'\xe2\x80\x94' README.md docs CHANGELOG.md >/dev/null 2>&1; then fail "no em dash in README/docs/CHANGELOG"; else pass "no em dash in README/docs/CHANGELOG"; fi
-has CHANGELOG.md "## 0.1.0 - 2026-10-13" && pass "CHANGELOG has 0.1.0 entry" || fail "CHANGELOG has 0.1.0 entry"
+VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
+grep -qE "^## ${VERSION//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md && pass "CHANGELOG has $VERSION entry" || fail "CHANGELOG has $VERSION entry"
 
 BT="${EQ_BUILD_TOOLS:-$HOME/Library/Android/sdk/build-tools/36.0.0}"
-APK="build/release/EQ-0.1.0-TESTSIGNED.apk"
+APK="build/release/EQ-${VERSION}-TESTSIGNED.apk"
 if grep -qiE "no network|no network permission" README.md; then
   if [ -f "$APK" ] && [ -x "$BT/aapt2" ]; then
     if "$BT/aapt2" dump permissions "$APK" 2>&1 | grep -q "android.permission.INTERNET"; then fail "README says no network but the APK lists INTERNET"; else pass "APK has no INTERNET permission (README claims none)"; fi

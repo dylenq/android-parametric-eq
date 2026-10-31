@@ -49,11 +49,11 @@ Per-device or per-app EQs, and AutoEq or ParametricEQ.txt import and export, are
 
 ## Install
 
-1. Download `EQ-0.1.0.apk` from the Releases page once it is published.
+1. Download `EQ-0.2.0-TESTSIGNED.apk` from the Releases page.
 2. Open it on your phone. Android asks you to allow installs from your browser or file manager ("unknown sources"). Play Protect may also show a notice about an app it has not seen before.
-3. Or install it from a computer with `adb install EQ-0.1.0.apk`.
+3. Or install it from a computer with `adb install EQ-0.2.0-TESTSIGNED.apk`.
 
-The APK is signed with the author's own key. `scripts/release-apk.sh` prints the signing certificate fingerprint when it builds the APK; to check a downloaded APK, run `apksigner verify --print-certs` and compare the SHA-256 digest with the fingerprint the author publishes with the release.
+Release 0.2.0 is signed with the project's test key, not a private release key. Anyone who builds the project can sign with that key, so only download it from this repository's Releases page. A later release signed with a private key will not install over it: uninstall first, which deletes saved settings and presets. To check a downloaded APK, run `apksigner verify --print-certs` and compare the SHA-256 digest with the fingerprint published with the release.
 
 ## First run
 
@@ -121,7 +121,7 @@ cargo test --workspace
 ./gradlew :app:assembleDebug
 ```
 
-A test-signed APK, named `EQ-0.1.0-TESTSIGNED.apk`, that must never be published:
+A test-signed APK, named `EQ-<version>-TESTSIGNED.apk`:
 
 ```bash
 scripts/release-apk.sh --test

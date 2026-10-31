@@ -2,9 +2,9 @@
 
 All notable changes are listed here, in the style of Keep a Changelog.
 
-## Unreleased
+## 0.2.0 - 2026-10-31
 
-Not released yet. Everything below was checked on an Android 17 arm64 emulator only, not on a physical phone.
+Checked on an Android 17 arm64 emulator and installed on one physical phone by the author. The release APK is signed with the project's public test key, not a private release key, so a later build signed with a real key will need an uninstall first (which deletes saved settings and presets).
 
 ### Added
 
