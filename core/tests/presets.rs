@@ -231,6 +231,48 @@ fn presets_stale_ctx_key_restores_without_marker() {
     assert_eq!(c.snapshot().active_preset_key.as_deref(), Some("builtin:Treble"));
 }
 
+#[test]
+fn presets_undo_rename_redo_keeps_the_marker_on_the_renamed_preset() {
+    let c = core();
+    c.save_preset("A".into()).unwrap();
+    c.apply_preset("builtin:Bass".into()).unwrap();
+    c.apply_preset("user:A".into()).unwrap();
+    assert!(c.undo());
+    c.rename_preset("user:A".into(), "B".into()).unwrap();
+    assert!(c.redo());
+    assert_eq!(c.snapshot().active_preset_key.as_deref(), Some("user:B"));
+    assert!(!c.snapshot().preset_modified);
+}
+
+#[test]
+fn presets_delete_then_save_same_name_is_not_picked_up_by_history() {
+    let c = core();
+    c.save_preset("A".into()).unwrap(); // marker user:A
+    c.apply_preset("builtin:Treble".into()).unwrap(); // undo entry carries marker user:A
+    c.delete_preset("user:A".into()).unwrap();
+    c.save_preset("A".into()).unwrap(); // an unrelated new preset with the old name
+    assert!(c.undo());
+    assert_eq!(c.snapshot().active_preset_key, None);
+}
+
+#[test]
+fn presets_apply_mid_gesture_is_its_own_step_with_mode_restored() {
+    let c = core();
+    c.set_mode(EqMode::Parametric);
+    c.begin_edit();
+    c.set_preamp(-2.0).unwrap();
+    assert!(c.apply_preset("builtin:Bass".into()).unwrap());
+    c.end_edit();
+    assert_eq!(c.snapshot().mode, EqMode::Graphic);
+    assert!(c.undo()); // the apply
+    let s = c.snapshot();
+    assert_eq!((s.mode, s.active_preset_key.clone()), (EqMode::Parametric, None));
+    assert_eq!(s.preamp_db, -2.0);
+    assert!(c.undo()); // the drag
+    assert_eq!(c.snapshot().preamp_db, 0.0);
+    assert_eq!(c.snapshot().mode, EqMode::Parametric);
+}
+
 fn modified(c: &EqCore) -> bool {
     c.snapshot().preset_modified
 }

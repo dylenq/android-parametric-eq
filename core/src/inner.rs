@@ -453,7 +453,8 @@ impl Inner {
     }
 
     /// Replaces mode, both editors, preamp, tone and balance in one undo step. Returns whether a
-    /// step was recorded (false when nothing changed). Does not close an open gesture.
+    /// step was recorded (false when nothing changed). An open gesture is closed first, so the
+    /// apply is always a step of its own that carries the mode and marker.
     pub fn apply_preset(&mut self, key: &str) -> Result<bool, EqError> {
         let mut preset = self.find_preset(key).ok_or(EqError::NotFound)?;
         if !preset.curve.sanitize() {
@@ -464,6 +465,7 @@ impl Inner {
         } else {
             presets::user_key(&preset.name)
         };
+        self.history.end_edit();
         let before = self.ctx_snapshot();
         self.apply_curve(&preset.curve);
         self.active_preset = Some(stored_key);
@@ -527,6 +529,7 @@ impl Inner {
         if self.active_preset.as_deref() == Some(key) {
             self.active_preset = Some(new_key.clone());
         }
+        self.history.rekey(key, Some(&new_key));
         Ok(new_key)
     }
 
@@ -537,6 +540,7 @@ impl Inner {
         if self.active_preset.as_deref() == Some(key) {
             self.active_preset = None;
         }
+        self.history.rekey(key, None);
         Ok(())
     }
 

@@ -95,6 +95,23 @@ impl History {
         }
     }
 
+    /// Rewrites the active-preset key `old` to `new` in every recorded step (rename), or
+    /// clears it when `new` is None (delete), so a stale key can never resolve to a different
+    /// preset that later takes the same name.
+    pub fn rekey(&mut self, old: &str, new: Option<&str>) {
+        let fix = |s: &mut EditSnapshot| {
+            if let Some(ctx) = s.preset_ctx.as_mut() {
+                if ctx.active.as_deref() == Some(old) {
+                    ctx.active = new.map(String::from);
+                }
+            }
+        };
+        self.undo.iter_mut().for_each(fix);
+        self.redo.iter_mut().for_each(fix);
+        self.pending.iter_mut().for_each(fix);
+        self.last_after.iter_mut().for_each(fix);
+    }
+
     pub fn can_undo(&self) -> bool {
         self.pending.is_some() || !self.undo.is_empty()
     }
@@ -288,6 +305,31 @@ mod tests {
         let fwd = h.redo(&back).unwrap();
         assert_eq!(fwd, after);
         assert_eq!(h.undo(&fwd).unwrap(), before);
+    }
+
+    #[test]
+    fn rekey_rewrites_or_clears_keys_in_every_stack() {
+        let mut h = History::default();
+        let mut before = snap(0.0);
+        before.preset_ctx = ctx(EqMode::Parametric, Some("user:A"));
+        let mut after = snap(-6.0);
+        after.preset_ctx = ctx(EqMode::Graphic, Some("user:A"));
+        h.record(before.clone(), &after);
+        let back = h.undo(&after).unwrap();
+        h.rekey("user:A", Some("user:B"));
+        assert_eq!(back.preset_ctx.as_ref().unwrap().active.as_deref(), Some("user:A"));
+        let fwd = h.redo(&back).unwrap();
+        assert_eq!(fwd.preset_ctx.unwrap().active.as_deref(), Some("user:B"));
+        // The undo stack now holds the pre-apply context; delete clears matching keys there.
+        h.rekey("user:A", None);
+        let undone = h.undo(&fwd_after()).unwrap();
+        assert_eq!(undone.preset_ctx.unwrap().active, None);
+    }
+
+    fn fwd_after() -> EditSnapshot {
+        let mut a = snap(-6.0);
+        a.preset_ctx = ctx(EqMode::Graphic, Some("user:B"));
+        a
     }
 
     #[test]
