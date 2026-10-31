@@ -27,6 +27,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,7 +64,8 @@ internal fun PresetSheet(ui: EqUiState, holder: UiStateHolder, spec: WindowSpec,
     // Which dialog is open and for which preset survive rotation and font changes (UI-SPEC Pitfall 8).
     var dialog by rememberSaveable { mutableStateOf(PresetDialog.None.name) }
     var target by rememberSaveable { mutableStateOf<String?>(null) }
-    val open = PresetDialog.valueOf(dialog)
+    // A restored string that no longer names a dialog (an older saved state) means no dialog.
+    val open = runCatching { PresetDialog.valueOf(dialog) }.getOrDefault(PresetDialog.None)
     fun show(d: PresetDialog, key: String? = null) { dialog = d.name; target = key }
     fun closeDialog() { dialog = PresetDialog.None.name; target = null }
     ModalBottomSheet(
@@ -112,6 +114,10 @@ internal fun PresetSheet(ui: EqUiState, holder: UiStateHolder, spec: WindowSpec,
     }
     val names = ui.presets.map { it.name }
     val targetInfo = ui.presets.firstOrNull { it.key == target }
+    // The target preset vanished (renamed away or deleted elsewhere): close its dialog outside composition.
+    LaunchedEffect(open, targetInfo == null) {
+        if ((open == PresetDialog.Rename || open == PresetDialog.Delete) && targetInfo == null) closeDialog()
+    }
     when (open) {
         PresetDialog.None -> Unit
         PresetDialog.SaveAs -> NameDialog(
@@ -125,7 +131,7 @@ internal fun PresetSheet(ui: EqUiState, holder: UiStateHolder, spec: WindowSpec,
             },
             onDismiss = ::closeDialog,
         )
-        PresetDialog.Rename -> if (targetInfo == null) closeDialog() else NameDialog(
+        PresetDialog.Rename -> if (targetInfo != null) NameDialog(
             title = "Rename preset",
             confirmLabel = "Rename",
             initial = targetInfo.name,
@@ -134,7 +140,7 @@ internal fun PresetSheet(ui: EqUiState, holder: UiStateHolder, spec: WindowSpec,
             onSubmit = { n -> holder.renamePreset(targetInfo.key, n) },
             onDismiss = ::closeDialog,
         )
-        PresetDialog.Delete -> if (targetInfo == null) closeDialog() else DeleteDialog(
+        PresetDialog.Delete -> if (targetInfo != null) DeleteDialog(
             name = targetInfo.name,
             onConfirm = {
                 holder.deletePreset(targetInfo.key)
