@@ -70,6 +70,8 @@ fun EqMessageSnackbars(holder: UiStateHolder, host: SnackbarHostState) {
 /** Ctrl+Z undoes; Ctrl+Shift+Z and Ctrl+Y redo. The holder ignores both while a gesture is open. */
 internal fun undoRedoShortcut(e: KeyEvent, holder: UiStateHolder): Boolean {
     if (e.type != KeyEventType.KeyDown || !e.isCtrlPressed) return false
+    // A focused band field holds a gesture open: the holder would ignore the key, so leave it to the field.
+    if (holder.ui.value.gestureOpen) return false
     return when {
         e.key == Key.Z && e.isShiftPressed -> { holder.redo(); true }
         e.key == Key.Z -> { holder.undo(); true }

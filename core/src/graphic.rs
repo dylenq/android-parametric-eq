@@ -67,32 +67,53 @@ fn pchip_slopes(x: &[f64], y: &[f64]) -> Vec<f64> {
     d
 }
 
-/// Target curve in dB at `f_hz` for sliders `gains_db` placed at `centres`.
-/// Flat (the end gain) below the first and above the last centre.
+/// The curve through a set of sliders. Build once and evaluate many times: a fit asks for hundreds
+/// of points, and the slopes depend only on the sliders.
+pub struct Curve {
+    x: Vec<f64>,
+    y: Vec<f64>,
+    d: Vec<f64>,
+}
+
+impl Curve {
+    pub fn new(centres: &[f32], gains_db: &[f32]) -> Self {
+        let n = centres.len().min(gains_db.len());
+        let x: Vec<f64> = centres[..n].iter().map(|&c| (c as f64).log2()).collect();
+        let y: Vec<f64> = gains_db[..n].iter().map(|&g| g as f64).collect();
+        let d = if n >= 2 { pchip_slopes(&x, &y) } else { Vec::new() };
+        Curve { x, y, d }
+    }
+
+    /// Target in dB at `f_hz`. Flat (the end gain) below the first and above the last centre.
+    pub fn at(&self, f_hz: f32) -> f32 {
+        let (x, y, d) = (&self.x, &self.y, &self.d);
+        let n = x.len();
+        if n == 0 {
+            return 0.0;
+        }
+        let xf = (f_hz.max(f32::MIN_POSITIVE) as f64).log2();
+        if n == 1 || xf <= x[0] {
+            return y[0] as f32;
+        }
+        if xf >= x[n - 1] {
+            return y[n - 1] as f32;
+        }
+        let i = x.partition_point(|&v| v <= xf).min(n - 1) - 1;
+        let h = x[i + 1] - x[i];
+        let t = (xf - x[i]) / h;
+        let (t2, t3) = (t * t, t * t * t);
+        let v = (2.0 * t3 - 3.0 * t2 + 1.0) * y[i]
+            + (t3 - 2.0 * t2 + t) * h * d[i]
+            + (-2.0 * t3 + 3.0 * t2) * y[i + 1]
+            + (t3 - t2) * h * d[i + 1];
+        v as f32
+    }
+}
+
+/// Target curve in dB at `f_hz` for sliders `gains_db` placed at `centres`. For one point only;
+/// use [`Curve`] for many.
 pub fn target_db(centres: &[f32], gains_db: &[f32], f_hz: f32) -> f32 {
-    let n = centres.len().min(gains_db.len());
-    if n == 0 {
-        return 0.0;
-    }
-    let x: Vec<f64> = centres[..n].iter().map(|&c| (c as f64).log2()).collect();
-    let y: Vec<f64> = gains_db[..n].iter().map(|&g| g as f64).collect();
-    let xf = (f_hz.max(f32::MIN_POSITIVE) as f64).log2();
-    if n == 1 || xf <= x[0] {
-        return y[0] as f32;
-    }
-    if xf >= x[n - 1] {
-        return y[n - 1] as f32;
-    }
-    let d = pchip_slopes(&x, &y);
-    let i = x.partition_point(|&v| v <= xf).min(n - 1) - 1;
-    let h = x[i + 1] - x[i];
-    let t = (xf - x[i]) / h;
-    let (t2, t3) = (t * t, t * t * t);
-    let v = (2.0 * t3 - 3.0 * t2 + 1.0) * y[i]
-        + (t3 - 2.0 * t2 + t) * h * d[i]
-        + (-2.0 * t3 + 3.0 * t2) * y[i + 1]
-        + (t3 - t2) * h * d[i + 1];
-    v as f32
+    Curve::new(centres, gains_db).at(f_hz)
 }
 
 /// Gains for `new_count` bands that reproduce the old curve at the new centres. Returns an
@@ -104,7 +125,8 @@ pub fn resample(old_count: u32, old_gains: &[f32], new_count: u32) -> Vec<f32> {
     if old_gains.len() != old_c.len() {
         return vec![0.0; new_c.len()];
     }
-    new_c.iter().map(|&f| target_db(old_c, old_gains, f)).collect()
+    let curve = Curve::new(old_c, old_gains);
+    new_c.iter().map(|&f| curve.at(f)).collect()
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 //! Versioned JSON persistence. The caller supplies the full path; the core builds none.
 
-use std::io::Read;
+use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
 
@@ -204,12 +204,20 @@ pub fn load_or_default(path: &str) -> Inner {
     load(path).unwrap_or_default()
 }
 
+/// Flushes to the disk before the rename: otherwise a power cut can leave the rename on disk but not
+/// the data, replacing a good file with an empty one.
+fn write_durably(path: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = std::fs::File::create(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
+}
+
 /// Writes `<path>.tmp` then renames it over `path`; the previous file survives any failure.
 pub fn save(path: &str, state: &Inner) -> Result<(), EqError> {
     let json = serde_json::to_vec_pretty(&PersistedState::from_inner(state))
         .map_err(|e| EqError::Io(e.to_string()))?;
     let tmp = format!("{path}.tmp");
-    if let Err(e) = std::fs::write(&tmp, &json) {
+    if let Err(e) = write_durably(&tmp, &json) {
         let _ = std::fs::remove_file(&tmp);
         return Err(EqError::Io(e.to_string()));
     }

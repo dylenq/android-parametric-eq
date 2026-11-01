@@ -124,4 +124,11 @@ class FormatsTest {
         assertEquals(-1f, BalanceMath.toCore(-250), 0f)
         assertEquals(0f, BalanceMath.toCore(0), 0f)
     }
+
+    @Test fun nonFiniteValuesFormatInsteadOfThrowingDuringComposition() {
+        assertEquals(GainFormat.format(0f), GainFormat.format(Float.NaN))
+        assertEquals(GainSpeech.format(0f), GainSpeech.format(Float.POSITIVE_INFINITY))
+        assertEquals(0, BalanceMath.toPercent(Float.NaN))
+        assertEquals(0f, SliderMath.snap(Float.NaN), 0f)
+    }
 }

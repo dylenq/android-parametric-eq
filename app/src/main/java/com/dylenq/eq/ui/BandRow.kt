@@ -228,7 +228,11 @@ private fun BandActions(index: Int, band: Band, actions: BandListActions) {
     val focus: FocusManager = LocalFocusManager.current
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         TextButton(
-            onClick = { actions.onDelete(index) },
+            onClick = {
+                // A focused field commits to this band now, not to the band that takes its index.
+                focus.clearFocus()
+                actions.onDelete(index)
+            },
             modifier = Modifier.testTag("band-delete-$index"),
             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
         ) { Text("Delete band") }

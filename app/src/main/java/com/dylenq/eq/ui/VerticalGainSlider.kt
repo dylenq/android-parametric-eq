@@ -95,6 +95,8 @@ fun VerticalGainSlider(
     val curGain = rememberUpdatedState(gainDb)
 
     var pressed by remember { mutableStateOf(false) }
+    // The bubble is shared by the panel's sliders, so a slider claims it only while pressed.
+    val coords = remember { arrayOfNulls<LayoutCoordinates>(1) }
     // While a finger is down this holds the value shown, so the thumb tracks it without waiting for a recomposition.
     var live by remember { mutableStateOf<Float?>(null) }
     val shown: () -> Float = { live ?: curGain.value() }
@@ -127,7 +129,7 @@ fun VerticalGainSlider(
         modifier
             .width(pitch)
             .testTag("band-$index")
-            .onGloballyPositioned { bubble.sliderCoords = it }
+            .onGloballyPositioned { coords[0] = it }
             .semantics {
                 contentDescription = cd
                 stateDescription = state
@@ -164,6 +166,7 @@ fun VerticalGainSlider(
                     val thumbY = inset + (1f - SliderMath.fractionFromGain(shown())) * (h - 2 * inset)
                     if (abs(down.position.y - thumbY) <= slot) {
                         pressed = true
+                        bubble.sliderCoords = coords[0]
                         bubble.gainDb = shown()
                         bubble.pressed = true
                     }
@@ -174,6 +177,7 @@ fun VerticalGainSlider(
                         if (slop != null) {
                             dragging = true
                             pressed = true
+                            bubble.sliderCoords = coords[0]
                             bubble.pressed = true
                             curStart.value()
                             haptics.dragStart()

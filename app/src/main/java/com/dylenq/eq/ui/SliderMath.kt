@@ -28,7 +28,7 @@ object SliderMath {
 
     /** Snaps to [STEP_DB], clamps to the slider range, and returns exactly 0 within (inclusive) [DETENT_DB] of 0. */
     fun snap(db: Float): Float {
-        if (abs(db) <= DETENT_DB) return 0f
+        if (!db.isFinite() || abs(db) <= DETENT_DB) return 0f
         val s = (db / STEP_DB).roundToInt() * STEP_DB
         return s.coerceIn(MIN_DB, MAX_DB).let { if (it == 0f) 0f else it }
     }

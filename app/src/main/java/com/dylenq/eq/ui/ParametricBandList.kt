@@ -85,7 +85,7 @@ fun ParametricBandList(
     pinchHintSeen: Boolean,
     modifier: Modifier = Modifier,
     footer: (@Composable () -> Unit)? = null,
-    fields: @Composable (index: Int, band: Band) -> Unit = { i, b -> BandFieldRow(i, b, actions) },
+    fields: @Composable (index: Int, band: Band) -> Unit = { i, b -> BandFieldRow(i, b, state().bands.size, actions) },
 ) {
     val ui = state()
     val bands = ui.bands

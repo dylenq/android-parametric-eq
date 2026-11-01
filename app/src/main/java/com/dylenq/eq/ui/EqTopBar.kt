@@ -36,6 +36,7 @@ import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
@@ -47,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -58,7 +60,11 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.dylenq.eq.R
 import com.dylenq.eq.core.EqMode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -268,8 +274,8 @@ private fun OverflowMenu(canReset: Boolean, onResetAll: () -> Unit, onOpenSettin
 }
 
 /**
- * Shows [message] for [durationMs] (SnackbarDuration.Long is not 6 s, so the snackbar is indefinite and
- * dismissed by a timer). [onAction] runs if the action was pressed.
+ * Shows [message] for [durationMs] once it reaches the front of the host's queue (SnackbarDuration.Long is
+ * not 6 s, so the snackbar is indefinite and dismissed by a timer). [onAction] runs if the action was pressed.
  */
 internal suspend fun SnackbarHostState.showTimed(
     message: String,
@@ -279,22 +285,43 @@ internal suspend fun SnackbarHostState.showTimed(
     dismissWhen: (suspend () -> Unit)? = null,
     onAction: () -> Unit = {},
 ) {
+    val visuals = TimedVisuals(message, actionLabel)
+    fun dismissIfShowing() {
+        currentSnackbarData?.takeIf { it.visuals === visuals }?.dismiss()
+    }
     coroutineScope {
+        // The host queues snackbars, so the timer starts when this one appears, not when it was asked for.
         val timer = launch {
+            snapshotFlow { currentSnackbarData?.visuals === visuals }.first { it }
             delay(durationMs)
-            currentSnackbarData?.dismiss()
+            dismissIfShowing()
         }
+        val show = async { showSnackbar(visuals) }
         val watcher = dismissWhen?.let { w ->
             launch {
                 w()
-                currentSnackbarData?.dismiss()
+                // A snackbar still in the queue is withdrawn: its action is no longer valid either.
+                if (currentSnackbarData?.visuals === visuals) dismissIfShowing() else show.cancel()
             }
         }
-        val result = showSnackbar(message, actionLabel, duration = SnackbarDuration.Indefinite)
+        val result = try {
+            show.await()
+        } catch (e: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            null
+        }
         timer.cancel()
         watcher?.cancel()
         if (result == SnackbarResult.ActionPerformed) onAction()
     }
+}
+
+private class TimedVisuals(
+    override val message: String,
+    override val actionLabel: String?,
+) : SnackbarVisuals {
+    override val withDismissAction = false
+    override val duration = SnackbarDuration.Indefinite
 }
 
 /**

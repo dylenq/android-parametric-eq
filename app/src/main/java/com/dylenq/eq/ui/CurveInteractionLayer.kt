@@ -240,7 +240,7 @@ private suspend fun AwaitPointerEventScope.drag(
         val ev = awaitPointerEvent(PointerEventPass.Main)
         if (ev.changes.count { it.pressed } >= 2) {
             // Drag turns into a pinch: same undo group, node frozen where it is.
-            pinch(m, gate, ev, plot)
+            pinch(m, gate, ev, plot, draggedIndex = index)
             return
         }
         val c = ev.changes.firstOrNull { it.id == down.id } ?: return
@@ -262,6 +262,8 @@ private suspend fun AwaitPointerEventScope.pinch(
     gate: GestureGate,
     start: PointerEvent,
     plot: Rect,
+    /** A pinch that grew out of a drag stays on the dragged band, wherever the second finger lands. */
+    draggedIndex: Int? = null,
 ) {
     start.changes.forEach { it.consume() }
     val pressed = start.changes.filter { it.pressed }
@@ -272,9 +274,9 @@ private suspend fun AwaitPointerEventScope.pinch(
     val list = m.bands()
     val w = m.yWindow()
     val nodes = list.map { ParametricMath.nodePosition(it.freq, it.gainDb, it.kind.hasGain(), plot, w) }
-    val target = ParametricMath.pinchTarget(
+    val target = (draggedIndex ?: ParametricMath.pinchTarget(
         nodes, centroid, m.selected(), ParametricMath.PINCH_CENTROID_RADIUS_DP * density,
-    )?.takeIf { it in list.indices }
+    ))?.takeIf { it in list.indices }
     var changed = false
     var allUp = false
     try {

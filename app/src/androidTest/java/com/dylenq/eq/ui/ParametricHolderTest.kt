@@ -134,4 +134,39 @@ class ParametricHolderTest {
         assertEquals(8, h.ui.value.bands.size)
         assertNull("never resurrected by redo", h.ui.value.selectedBand)
     }
+
+    @Test fun aModeSwitchClosesAFocusedFieldInsteadOfBeingIgnored() {
+        parametricSetup()
+        val h = newHolder()
+        h.bandFieldFocusGained(0)
+        assertTrue(h.ui.value.gestureOpen)
+        h.setMode(EqMode.GRAPHIC)
+        assertEquals(EqMode.GRAPHIC, ctrl.snapshot().mode)
+        assertFalse(h.ui.value.gestureOpen)
+        h.bandFieldFocusLost()
+        assertFalse(h.ui.value.gestureOpen)
+    }
+
+    @Test fun resetAllDuringADragLeavesTheDragsUndoGroupAlone() {
+        val h = newHolder()
+        h.onBandDragStart(0)
+        h.onBandDragChange(0, 4f)
+        h.resetAll()
+        assertEquals(4f, ctrl.snapshot().graphicGainsDb[0], 0f)
+        h.onBandDragChange(0, 5f)
+        h.onBandDragEnd()
+        assertEquals(1, undoDepth())
+    }
+
+    @Test fun nonFiniteValuesAreIgnoredWithoutAnEdit() {
+        val h = newHolder()
+        val serial = h.editSerial.value
+        h.setPreamp(Float.NaN)
+        h.onBandDragChange(0, Float.NaN)
+        h.parametricNodeChange(0, Float.POSITIVE_INFINITY, null)
+        h.parametricNodeChange(0, 1000f, Float.NaN)
+        assertEquals(serial, h.editSerial.value)
+        assertEquals(0f, ctrl.snapshot().preampDb, 0f)
+        assertEquals(0f, ctrl.snapshot().graphicGainsDb[0], 0f)
+    }
 }

@@ -194,6 +194,32 @@ class CurvePinchTest : CurveTestBase() {
         assertEquals(before, controller.snapshot().bands[3])
     }
 
+    @Test fun aPinchThatGrowsOutOfADragStaysOnTheDraggedBand() {
+        hostCard()
+        val before = controller.snapshot().bands
+        val start = node(3)
+        val neighbour = node(4)
+        val f0 = start + Offset(dp(30f), -dp(8f))
+        layer.performTouchInput {
+            down(0, start)
+            moveTo(0, start + Offset(dp(10f), 0f))
+            moveTo(0, f0)
+        }
+        rule.compose.waitForIdle()
+        // The pair's centre sits on the neighbouring node, which is what a fresh pinch would pick.
+        val second = neighbour * 2f - f0
+        layer.performTouchInput {
+            down(1, second)
+            moveTo(1, second + (second - f0) * 0.5f)
+            up(1)
+            up(0)
+        }
+        rule.compose.waitForIdle()
+        val after = controller.snapshot().bands
+        assertEquals("the neighbour was not the dragged band", before[4].q, after[4].q, 0f)
+        assertTrue("the dragged band's Q moved: ${after[3].q}", after[3].q != before[3].q)
+    }
+
     @Test fun afterACancelTheEditIsEndedAndTheNextDragIsItsOwnStep() {
         hostCard()
         val start = node(3)

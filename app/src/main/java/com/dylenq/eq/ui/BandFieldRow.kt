@@ -96,7 +96,14 @@ internal class FieldFocusSession(
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun BandFieldRow(index: Int, band: Band, actions: BandListActions, modifier: Modifier = Modifier) {
+internal fun BandFieldRow(
+    index: Int,
+    band: Band,
+    /** Rows are keyed by position, so a changed band count means this row may now show another band. */
+    bandCount: Int,
+    actions: BandListActions,
+    modifier: Modifier = Modifier,
+) {
     val scope = rememberCoroutineScope()
     val actionsNow = rememberUpdatedState(actions)
     val indexNow = rememberUpdatedState(index)
@@ -125,7 +132,7 @@ internal fun BandFieldRow(index: Int, band: Band, actions: BandListActions, modi
             modelText = NumericField.formatFrequency(band.freq), session = session,
             parse = NumericField::parseFrequency, format = NumericField::formatFrequency,
             apply = { actionsNow.value.onFieldChange(indexNow.value, it, null, null) },
-            message = message, onMessage = { message = it }, modifier = m,
+            bandCount = bandCount, message = message, onMessage = { message = it }, modifier = m,
         )
     }
     val gain: @Composable (Modifier) -> Unit = { m ->
@@ -135,7 +142,7 @@ internal fun BandFieldRow(index: Int, band: Band, actions: BandListActions, modi
             modelText = if (band.kind.hasGain()) NumericField.formatGain(band.gainDb) else "-", session = session,
             parse = NumericField::parseGain, format = NumericField::formatGain,
             apply = { actionsNow.value.onFieldChange(indexNow.value, null, it, null) },
-            message = message, onMessage = { message = it }, modifier = m,
+            bandCount = bandCount, message = message, onMessage = { message = it }, modifier = m,
         )
     }
     val q: @Composable (Modifier) -> Unit = { m ->
@@ -145,7 +152,7 @@ internal fun BandFieldRow(index: Int, band: Band, actions: BandListActions, modi
             modelText = NumericField.formatQ(band.q), session = session,
             parse = NumericField::parseQ, format = NumericField::formatQ,
             apply = { actionsNow.value.onFieldChange(indexNow.value, null, null, it) },
-            message = message, onMessage = { message = it }, modifier = m,
+            bandCount = bandCount, message = message, onMessage = { message = it }, modifier = m,
         )
     }
 
@@ -194,6 +201,7 @@ private fun NumberField(
     parse: (String) -> FieldParse,
     format: (Float) -> String,
     apply: (Float) -> Unit,
+    bandCount: Int,
     message: Pair<BandField, String>?,
     onMessage: (Pair<BandField, String>?) -> Unit,
     modifier: Modifier = Modifier,
@@ -207,14 +215,30 @@ private fun NumberField(
     var atFocus by remember { mutableStateOf(modelText) }
     val modelNow = rememberUpdatedState(modelText)
     val applyNow = rememberUpdatedState(apply)
+    val bandCountNow = rememberUpdatedState(bandCount)
+    // The band count the draft was typed against; a draft never carries over to another band.
+    var draftBandCount by remember { mutableStateOf(bandCount) }
 
     // Not focused and not mid-edit: show the latest formatted model value (a drag, an undo, a sign flip).
     LaunchedEffect(modelText, focused, dirty) {
         if (!focused && !dirty && value.text != modelText) value = TextFieldValue(modelText)
     }
 
+    LaunchedEffect(bandCount) {
+        if (draftBandCount != bandCount) {
+            draftBandCount = bandCount
+            dirty = false
+            atFocus = modelText
+            value = TextFieldValue(modelText)
+        }
+    }
+
     /** Pitfall 5: nothing happens when the text is what it was at focus. */
     fun commit() {
+        if (draftBandCount != bandCountNow.value) {
+            dirty = false
+            return
+        }
         val text = value.text
         if (!enabled || !NumericField.shouldCommit(atFocus, text)) {
             dirty = false
@@ -240,12 +264,18 @@ private fun NumberField(
     }
     val commitNow = rememberUpdatedState(::commit)
 
+    // Restored after a rotation with unsaved text and no focus: nothing would ever refresh or commit it
+    // visibly, so handle it as the blur it effectively was.
+    LaunchedEffect(Unit) {
+        if (dirty && !focused) commit()
+    }
+
     // The row collapsed or left the screen while this field had unsaved text: apply it, do not touch state.
     val draftNow = rememberUpdatedState(value.text)
     val atFocusNow = rememberUpdatedState(atFocus)
     DisposableEffect(Unit) {
         onDispose {
-            if (enabled && NumericField.shouldCommit(atFocusNow.value, draftNow.value)) {
+            if (enabled && draftBandCount == bandCountNow.value && NumericField.shouldCommit(atFocusNow.value, draftNow.value)) {
                 when (val r = parse(draftNow.value)) {
                     is FieldParse.Value -> applyNow.value(r.value)
                     is FieldParse.Clamped -> applyNow.value(r.value)
@@ -264,7 +294,8 @@ private fun NumberField(
             value = new
             if (!changed) return@OutlinedTextField
             dirty = true
-            if (message?.first == which) onMessage(null)
+            // Any new typing supersedes the row's single message, whichever field it came from.
+            if (message != null) onMessage(null)
             val r = parse(new.text)
             if (r is FieldParse.Value) apply(r.value)
         },

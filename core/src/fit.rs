@@ -59,12 +59,13 @@ pub fn band_target(band: Band, sample_rate: f64) -> impl Fn(f64) -> f64 {
 
 /// Target closure for graphic sliders at the standard centres for `count`.
 /// Returns `None` for an unsupported count or short gain vector.
-pub fn graphic_target<'a>(count: u32, gains_db: &'a [f32]) -> Option<impl Fn(f64) -> f64 + 'a> {
+pub fn graphic_target(count: u32, gains_db: &[f32]) -> Option<impl Fn(f64) -> f64 + use<>> {
     let centres = graphic::centres(count)?;
     if gains_db.len() < centres.len() {
         return None;
     }
-    Some(move |f: f64| graphic::target_db(centres, gains_db, f as f32) as f64)
+    let curve = graphic::Curve::new(centres, gains_db);
+    Some(move |f: f64| curve.at(f as f32) as f64)
 }
 
 #[cfg(test)]

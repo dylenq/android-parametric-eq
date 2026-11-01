@@ -153,6 +153,7 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     /** Clamps to the core limits; snapping to 0.5 dB and the zero detent belong to the slider. */
     fun onBandDragChange(index: Int, db: Float) = guarded {
+        if (!db.isFinite()) return@guarded
         edited()
         val v = db.coerceIn(-GRAPHIC_LIMIT_DB, GRAPHIC_LIMIT_DB)
         controller.edit { it.setGraphicGain(index.toUInt(), v) }
@@ -198,6 +199,7 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     /** [gainDb] null keeps the band's gain (pass filters have none). Values arrive snapped and clamped. */
     fun parametricNodeChange(index: Int, freqHz: Float, gainDb: Float?) = guarded {
+        if (!freqHz.isFinite() || gainDb?.isFinite() == false) return@guarded
         val band = _ui.value.bands.getOrNull(index) ?: return@guarded
         edited()
         val next = band.copy(freq = freqHz, gainDb = gainDb ?: band.gainDb)
@@ -289,6 +291,8 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun setMode(mode: EqMode) = guarded {
+        // The screen drops field focus before calling this, but a field's blur only arrives a frame later.
+        endGesture(Source.FIELD)
         if (gestureDepth > 0) return@guarded
         edited()
         controller.edit { it.setMode(mode) }
@@ -301,6 +305,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun setPreamp(db: Float) = guarded {
+        if (!db.isFinite()) return@guarded
         edited()
         val v = db.coerceIn(PREAMP_MIN_DB, PREAMP_MAX_DB)
         controller.edit { it.setPreamp(v) }
@@ -400,6 +405,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     fun applySuggestedPreamp() = guarded {
+        if (!_ui.value.suggestedPreampDb.isFinite()) return@guarded
         edited()
         val s = _ui.value.suggestedPreampDb.coerceIn(PREAMP_MIN_DB, PREAMP_MAX_DB)
         controller.edit { it.setPreamp(s) }
@@ -588,6 +594,8 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     /** Parametric: default seven bands and preamp 0 as one step. Graphic: zeroes the graphic gains and the preamp. */
     fun resetAll() = guarded {
+        // Its own undo step: while another control holds a group open it would close that group early.
+        if (gestureDepth > 0) return@guarded
         if (_ui.value.mode == EqMode.PARAMETRIC) {
             val before = controller.snapshot()
             controller.resetBands()
@@ -607,7 +615,6 @@ class UiStateHolder(val runtime: EqRuntime) {
             emitToneHintIfNeeded()
             return@guarded
         }
-        edited()
         controller.beginEdit()
         try {
             controller.edit { c ->
@@ -617,6 +624,8 @@ class UiStateHolder(val runtime: EqRuntime) {
         } finally {
             controller.endEdit()
         }
+        // After the write: the Reset all snackbar reads a moved serial as success and offers Undo.
+        edited()
         _ui.update { it.copy(lastTouchedBand = null) }
         republishLocked()
     }

@@ -37,7 +37,7 @@ object FreqFormat {
 /** Gain label: one decimal, explicit sign, U+2212 minus, unit. Exactly zero has no sign or decimal. */
 object GainFormat {
     fun format(db: Float): String {
-        val t = (db * 10f).roundToInt()
+        val t = tenths(db)
         if (t == 0) return "0 dB"
         val sign = if (t > 0) "+" else "−"
         val a = abs(t)
@@ -52,7 +52,7 @@ object GainFormat {
  */
 object DbFormat {
     fun magnitude(db: Float): String {
-        val t = abs((db * 10f).roundToInt())
+        val t = abs(tenths(db))
         return "${t / 10}.${t % 10}"
     }
 }
@@ -68,7 +68,7 @@ object FreqSpeech {
 /** Spoken gain: "plus 3.5 decibels", "minus 2 decibels", "0 decibels". */
 object GainSpeech {
     fun format(db: Float): String {
-        val t = (db * 10f).roundToInt()
+        val t = tenths(db)
         if (t == 0) return "0 decibels"
         val a = abs(t)
         val num = if (a % 10 == 0) "${a / 10}" else "${a / 10}.${a % 10}"
@@ -77,7 +77,7 @@ object GainSpeech {
 
     /** Unsigned magnitude, e.g. "2.3 decibels". */
     fun magnitude(db: Float): String {
-        val a = abs((db * 10f).roundToInt())
+        val a = abs(tenths(db))
         val num = if (a % 10 == 0) "${a / 10}" else "${a / 10}.${a % 10}"
         return "$num ${if (a == 10) "decibel" else "decibels"}"
     }
@@ -106,9 +106,12 @@ object BalanceMath {
     /** Rounded, clamped to +-100; |p| <= 1 snaps to 0 so a near-centre value reads Centre. */
     fun toPercent(core: Float): Int {
         if (!core.isFinite()) return 0
-        val p = (core * 100f).roundToInt().coerceIn(-100, 100)
+        val p = (if (core.isFinite()) core * 100f else 0f).roundToInt().coerceIn(-100, 100)
         return if (abs(p) <= 1) 0 else p
     }
 
     fun toCore(percent: Int): Float = percent.coerceIn(-100, 100) / 100f
 }
+
+/** Tenths of a dB for display; a non-finite value reads as 0 rather than throwing during composition. */
+private fun tenths(db: Float): Int = if (db.isFinite()) (db * 10f).roundToInt() else 0

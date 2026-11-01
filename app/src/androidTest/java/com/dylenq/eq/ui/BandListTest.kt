@@ -645,4 +645,40 @@ class BandListTest {
         assertEquals(9f, bands()[i].gainDb, 0f)
         awaitOverlayPeakNear(5000f)
     }
+
+    // ---- a draft belongs to the band it was typed for -------------------------------------------
+
+    @Test fun theDeleteButtonNeverWritesAFocusedDraftToTheNextBand() {
+        hostList()
+        openRow(2)
+        val next = bands()[3]
+        type("band-field-freq-2", "99999")
+        tag("band-delete-2").performClick()
+        compose.waitForIdle()
+        assertEquals(next, bands()[2])
+    }
+
+    @Test fun aRemovalFromElsewhereDropsTheDraftOfTheRowThatShifted() {
+        hostList()
+        openRow(2)
+        val next = bands()[3]
+        type("band-field-freq-2", "99999")
+        // The node menu and the TalkBack action remove a band without touching focus.
+        holder.removeBand(2)
+        compose.waitForIdle()
+        assertEquals(next, bands()[2])
+        holder.selectBand(2)
+        compose.waitForIdle()
+        assertEquals(next, bands()[2])
+    }
+
+    @Test fun typingInAnyFieldClearsTheMessageOfAnotherField() {
+        hostList()
+        openRow(2)
+        type("band-field-freq-2", "99999")
+        ime("band-field-freq-2")
+        tag("band-field-message-2").assertExists()
+        type("band-field-q-2", "2")
+        compose.onAllNodes(hasTestTag("band-field-message-2")).assertCountEquals(0)
+    }
 }

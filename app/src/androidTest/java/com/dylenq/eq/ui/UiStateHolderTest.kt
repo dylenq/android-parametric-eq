@@ -264,7 +264,7 @@ class UiStateHolderTest {
 
         h.onBandDragStart(2)
         h.onBandDragChange(2, 3f)
-        h.onBandDragChange(2, Float.NaN) // the core rejects non-finite values
+        h.onBandDragChange(99, 3f) // the core rejects an index out of range
         val end = System.currentTimeMillis() + 2000
         while (got.isEmpty() && System.currentTimeMillis() < end) Thread.sleep(10)
         h.onBandDragEnd()
