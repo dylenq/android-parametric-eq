@@ -88,10 +88,10 @@ impl History {
 
     fn commit_pending(&mut self) {
         let after = self.last_after.take();
-        if let Some(before) = self.pending.take() {
-            if after.as_ref() != Some(&before) {
-                self.push(before);
-            }
+        if let Some(before) = self.pending.take()
+            && after.as_ref() != Some(&before)
+        {
+            self.push(before);
         }
     }
 
@@ -100,10 +100,10 @@ impl History {
     /// preset that later takes the same name.
     pub fn rekey(&mut self, old: &str, new: Option<&str>) {
         let fix = |s: &mut EditSnapshot| {
-            if let Some(ctx) = s.preset_ctx.as_mut() {
-                if ctx.active.as_deref() == Some(old) {
-                    ctx.active = new.map(String::from);
-                }
+            if let Some(ctx) = s.preset_ctx.as_mut()
+                && ctx.active.as_deref() == Some(old)
+            {
+                ctx.active = new.map(String::from);
             }
         };
         self.undo.iter_mut().for_each(fix);

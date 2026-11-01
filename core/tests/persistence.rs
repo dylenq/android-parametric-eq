@@ -1,3 +1,6 @@
+// Band values below deliberately use every digit an f32 can carry.
+#![allow(clippy::excessive_precision)]
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use eq_core::error::EqError;
@@ -267,7 +270,7 @@ fn tone_and_balance_clamp_and_non_finite() {
 // ---- Phase 9: presets ----
 
 fn preset_json(name: &str, extra: &str) -> String {
-    let gains = vec!["0.0"; 10].join(",");
+    let gains = ["0.0"; 10].join(",");
     let bands = serde_json::to_string(&Inner::default().parametric).unwrap();
     format!(
         r#"{{"name":{name},"curve":{{"mode":"Graphic","bands":{bands},"graphic_band_count":10,"graphic_gains_db":[{gains}],"preamp_db":0.0,"bass_db":0.0,"treble_db":0.0,"balance":0.0{extra}}}}}"#,

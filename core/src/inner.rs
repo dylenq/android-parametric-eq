@@ -712,10 +712,12 @@ mod tests {
 
     #[test]
     fn reset_bands_leaves_other_state_alone() {
-        let mut s = Inner::default();
-        s.mode = EqMode::Parametric;
-        s.bypass = true;
-        s.limiter_enabled = false;
+        let mut s = Inner {
+            mode: EqMode::Parametric,
+            bypass: true,
+            limiter_enabled: false,
+            ..Default::default()
+        };
         s.set_frame_duration_ms(50.0).unwrap();
         s.set_graphic_gain(0, 4.0).unwrap();
         s.set_preamp(-3.0).unwrap();
@@ -778,10 +780,12 @@ mod tests {
 
     #[test]
     fn mode_bypass_limiter_and_frame_are_not_undoable() {
-        let mut s = Inner::default();
-        s.mode = EqMode::Parametric;
-        s.bypass = true;
-        s.limiter_enabled = false;
+        let mut s = Inner {
+            mode: EqMode::Parametric,
+            bypass: true,
+            limiter_enabled: false,
+            ..Default::default()
+        };
         s.set_frame_duration_ms(170.6).unwrap();
         assert!(!s.can_undo());
         s.set_preamp(3.0).unwrap();
@@ -794,8 +798,7 @@ mod tests {
 
     #[test]
     fn lone_peak_ideal_is_six_db_and_flat_is_zero() {
-        let mut s = Inner::default();
-        s.mode = EqMode::Parametric;
+        let mut s = Inner { mode: EqMode::Parametric, ..Default::default() };
         for b in s.parametric.iter_mut() {
             b.enabled = false;
         }

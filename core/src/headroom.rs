@@ -160,6 +160,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn limiter_is_verified_by_the_phase3_table() {
         // Flipped only because LIMITER-TABLE.md shows every row within 1.5 dB.
         assert!(LIMITER_VERIFIED);

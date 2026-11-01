@@ -1,0 +1,35 @@
+# Proposes dependency updates once a month, grouped into one pull request per ecosystem.
+# Cargo and Gradle updates are limited to patch releases: UniFFI, Compose and the Android Gradle
+# plugin are upgrades to do by hand and to check on the emulator. Security advisories still raise
+# their own alerts.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      cargo:
+        patterns: ["*"]
+
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: monthly
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      gradle:
+        patterns: ["*"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

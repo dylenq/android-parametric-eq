@@ -201,7 +201,7 @@ mod tests {
             assert_eq!(target_db(c, &g, 1.0), g[0]);
             assert_eq!(target_db(c, &g, 10.0), g[0]);
             assert_eq!(target_db(c, &g, 24000.0), g[c.len() - 1]);
-            assert_eq!(target_db(c, &g, 20000.0).is_finite(), true);
+            assert!(target_db(c, &g, 20000.0).is_finite());
             if c[c.len() - 1] < 20000.0 {
                 assert_eq!(target_db(c, &g, 20000.0), g[c.len() - 1]);
             }
