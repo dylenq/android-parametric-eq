@@ -65,6 +65,9 @@ class ToneActions<T>(
 /** Largest balance percent the slider offers; the core's value is percent / 100. */
 private const val BALANCE_MAX = 100f
 
+/** The part of the state the tone card shows. */
+private data class ToneSlice(val bassDb: Float, val trebleDb: Float, val balance: Float)
+
 /**
  * UI-SPEC "Tone & balance": Bass, Treble and Balance sliders with value pills. State is read from
  * [state] only, so undo, redo and restore move the thumbs with no local state. [largeFont] is the stacked
@@ -80,7 +83,7 @@ fun ToneCard(
     compact: Boolean = false,
     largeFont: Boolean = false,
 ) {
-    val s = state()
+    val s by rememberSlice(state) { ToneSlice(it.bassDb, it.trebleDb, it.balance) }
     Card(
         modifier = modifier.fillMaxWidth().testTag("tone-card"),
         shape = RoundedCornerShape(12.dp),

@@ -1,6 +1,11 @@
 package com.dylenq.eq.ui
 
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.EqMode
 import com.dylenq.eq.core.PresetInfo
@@ -83,4 +88,14 @@ data class EqUiState(
     /** Gain of [lastTouchedBand], if any. */
     val lastTouchedGainDb: Float?
         get() = lastTouchedBand?.let { graphicGainsDb.getOrNull(it) }
+}
+
+/**
+ * A slice of the state for a card that does not need the rest. The whole state changes on every curve
+ * recompute during a drag; a card reading only its slice skips those recompositions.
+ */
+@Composable
+internal fun <T> rememberSlice(state: () -> EqUiState, pick: (EqUiState) -> T): State<T> {
+    val current = rememberUpdatedState(state)
+    return remember { derivedStateOf { pick(current.value()) } }
 }

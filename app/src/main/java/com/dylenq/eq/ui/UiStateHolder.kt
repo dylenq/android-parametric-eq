@@ -167,20 +167,7 @@ class UiStateHolder(val runtime: EqRuntime) {
         refreshCurve()
     }
 
-    fun onBandDragEnd() {
-        try {
-            synchronized(lock) {
-                endGesture(Source.GRAPHIC)
-            }
-        } catch (e: Exception) {
-            if (!isCoreFailure(e)) throw e
-            fail()
-        } finally {
-            _ui.update { it.copy(draggingBand = null) }
-            republish()
-            refreshCurve()
-        }
-    }
+    fun onBandDragEnd() = closeGesture(Source.GRAPHIC) { it.copy(draggingBand = null) }
 
     // ---- parametric ----------------------------------------------------------------------
 
@@ -204,14 +191,7 @@ class UiStateHolder(val runtime: EqRuntime) {
         edited()
         val next = band.copy(freq = freqHz, gainDb = gainDb ?: band.gainDb)
         controller.edit { it.setBand(index.toUInt(), next) }
-        _ui.update { s ->
-            if (index in s.bands.indices) {
-                s.copy(bands = s.bands.toMutableList().also { it[index] = next })
-            } else {
-                s
-            }
-        }
-        refreshCurve()
+        publishBand(index, next)
     }
 
     /** Pinch: sets only the Q of band [index]; frequency, gain, kind and enabled stay. Inside a gesture. */
@@ -221,14 +201,7 @@ class UiStateHolder(val runtime: EqRuntime) {
         edited()
         val next = band.copy(q = q.coerceIn(ParametricMath.MIN_Q, ParametricMath.MAX_Q))
         controller.edit { it.setBand(index.toUInt(), next) }
-        _ui.update { s ->
-            if (index in s.bands.indices) {
-                s.copy(bands = s.bands.toMutableList().also { it[index] = next })
-            } else {
-                s
-            }
-        }
-        refreshCurve()
+        publishBand(index, next)
     }
 
     /**
@@ -258,23 +231,10 @@ class UiStateHolder(val runtime: EqRuntime) {
             endGesture(Source.ADD)
         }
         republishLocked()
-        if (index >= 0) _ui.update { s -> if (index in s.bands.indices) s.copy(selectedBand = index) else s }
+        selectAdded(index)
     }
 
-    fun parametricGestureEnd() {
-        try {
-            synchronized(lock) {
-                endGesture(Source.PARAMETRIC)
-            }
-        } catch (e: Exception) {
-            if (!isCoreFailure(e)) throw e
-            fail()
-        } finally {
-            _ui.update { it.copy(draggingBand = null) }
-            republish()
-            refreshCurve()
-        }
-    }
+    fun parametricGestureEnd() = closeGesture(Source.PARAMETRIC) { it.copy(draggingBand = null) }
 
     fun resetBand(index: Int) = guarded {
         edited()
@@ -317,19 +277,7 @@ class UiStateHolder(val runtime: EqRuntime) {
         beginGesture(Source.PREAMP)
     }
 
-    fun preampDragEnd() {
-        try {
-            synchronized(lock) {
-                endGesture(Source.PREAMP)
-            }
-        } catch (e: Exception) {
-            if (!isCoreFailure(e)) throw e
-            fail()
-        } finally {
-            republish()
-            refreshCurve()
-        }
-    }
+    fun preampDragEnd() = closeGesture(Source.PREAMP)
 
     fun resetPreamp() = setPreamp(0f)
 
@@ -346,7 +294,7 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     fun bassDragStart() = guarded { beginGesture(Source.BASS) }
 
-    fun bassDragEnd() = endToneGesture(Source.BASS)
+    fun bassDragEnd() = closeGesture(Source.BASS)
 
     /** At the default this is a no-op (no edit, no undo step); otherwise one undo step back to 0. */
     fun resetBass() {
@@ -365,7 +313,7 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     fun trebleDragStart() = guarded { beginGesture(Source.TREBLE) }
 
-    fun trebleDragEnd() = endToneGesture(Source.TREBLE)
+    fun trebleDragEnd() = closeGesture(Source.TREBLE)
 
     fun resetTreble() {
         if (_ui.value.trebleDb == 0f) return
@@ -383,25 +331,11 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     fun balanceDragStart() = guarded { beginGesture(Source.BALANCE) }
 
-    fun balanceDragEnd() = endToneGesture(Source.BALANCE)
+    fun balanceDragEnd() = closeGesture(Source.BALANCE)
 
     fun resetBalance() {
         if (_ui.value.balance == 0f) return
         setBalance(0)
-    }
-
-    private fun endToneGesture(source: Source) {
-        try {
-            synchronized(lock) {
-                endGesture(source)
-            }
-        } catch (e: Exception) {
-            if (!isCoreFailure(e)) throw e
-            fail()
-        } finally {
-            republish()
-            refreshCurve()
-        }
     }
 
     fun applySuggestedPreamp() = guarded {
@@ -434,6 +368,19 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     private fun bandAt(index: Int): Band? = controller.snapshot().bands.getOrNull(index)
+
+    /** Publishes a live gesture's new value for band [index] without re-reading the whole snapshot. */
+    private fun publishBand(index: Int, next: Band) {
+        _ui.update { s ->
+            if (index in s.bands.indices) s.copy(bands = s.bands.toMutableList().also { it[index] = next }) else s
+        }
+        refreshCurve()
+    }
+
+    /** Selects the band just added at [index], if there is one. */
+    private fun selectAdded(index: Int) {
+        if (index >= 0) _ui.update { s -> if (index in s.bands.indices) s.copy(selectedBand = index) else s }
+    }
 
     private fun writeBand(index: Int, next: Band) {
         edited()
@@ -501,7 +448,7 @@ class UiStateHolder(val runtime: EqRuntime) {
             }
         }
         republishLocked()
-        if (index >= 0) _ui.update { s -> if (index in s.bands.indices) s.copy(selectedBand = index) else s }
+        selectAdded(index)
     }
 
     // ---- band list text fields (one undo step per focus session) ----------------------------
@@ -539,19 +486,7 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     /** The field session ended (no field of the row has focus any more): closes the undo step. Idempotent. */
-    fun bandFieldFocusLost() {
-        try {
-            synchronized(lock) {
-                endGesture(Source.FIELD)
-            }
-        } catch (e: Exception) {
-            if (!isCoreFailure(e)) throw e
-            fail()
-        } finally {
-            republish()
-            refreshCurve()
-        }
-    }
+    fun bandFieldFocusLost() = closeGesture(Source.FIELD)
 
     /** Moves band [index] by [steps] twelfths of an octave (negative = down). */
     fun nudgeBandFrequency(index: Int, steps: Int) = guarded {
@@ -765,6 +700,20 @@ class UiStateHolder(val runtime: EqRuntime) {
     }
 
     // ---- internals -----------------------------------------------------------------------
+
+    /** Ends [source]'s gesture. The UI state is always refreshed, so a core error cannot leave a control stuck. */
+    private inline fun closeGesture(source: Source, after: (EqUiState) -> EqUiState = { it }) {
+        try {
+            synchronized(lock) { endGesture(source) }
+        } catch (e: Exception) {
+            if (!isCoreFailure(e)) throw e
+            fail()
+        } finally {
+            _ui.update(after)
+            republish()
+            refreshCurve()
+        }
+    }
 
     /** Runs a core write under the lock; a core error becomes one error event plus a re-read. */
     private inline fun guarded(block: () -> Unit) {

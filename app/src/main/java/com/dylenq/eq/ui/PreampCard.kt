@@ -75,6 +75,15 @@ internal fun overBy(headroomDb: Float): String = DbFormat.magnitude(-headroomDb)
 internal fun showsSuggestion(suggestedDb: Float, preampDb: Float): Boolean =
     suggestedDb < 0f && abs(suggestedDb - preampDb) >= 0.5f
 
+/** The part of the state the preamp card shows. */
+internal data class PreampSlice(
+    val preampDb: Float,
+    val bypass: Boolean,
+    val suggestedPreampDb: Float,
+    val headroomAfterPreampDb: Float,
+    val limiterEnabled: Boolean,
+)
+
 /**
  * UI-SPEC "Preamp, Limiter, Bypass": preamp slider with value pill, suggested-preamp row and limiter
  * switch. [compact] is the landscape form (two 56 dp rows, headroom text omitted).
@@ -94,7 +103,9 @@ fun PreampCard(
     /** Tight portrait window: half the vertical padding, so the limiter row fits at 360 x 800 dp. */
     tight: Boolean = false,
 ) {
-    val s = state()
+    val s by rememberSlice(state) {
+        PreampSlice(it.preampDb, it.bypass, it.suggestedPreampDb, it.headroomAfterPreampDb, it.limiterEnabled)
+    }
     val haptics = rememberHaptics()
     val interaction = remember { MutableInteractionSource() }
 
@@ -239,7 +250,7 @@ private fun PreampPill(preampDb: Float, onReset: () -> Unit) {
 
 /** Chip when a suggestion would change the preamp, else helper text; an over-the-limit error replaces the helper. */
 @Composable
-private fun SuggestedRow(s: EqUiState, onApply: () -> Unit, showHeadroom: Boolean = true) {
+private fun SuggestedRow(s: PreampSlice, onApply: () -> Unit, showHeadroom: Boolean = true) {
     // Bypassed: nothing is applied, so headroom, an over-the-limit error and a suggestion would all
     // describe audio that is not being processed. The row keeps its height so the toggle never shifts layout.
     val chip = !s.bypass && showsSuggestion(s.suggestedPreampDb, s.preampDb)
