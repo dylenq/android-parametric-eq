@@ -1,6 +1,6 @@
 # Releasing EQ for Android
 
-Nothing has been published. No keystore exists, no GitHub repository exists, no remote is configured and no tag has been created. These are the steps for you to publish.
+Release 0.2.0 was published by hand with a test-signed APK, from github.com/dylenq/android-parametric-eq (the git remote is named `github`). No private release keystore exists yet and the three secrets below are not set. These are the steps for a first properly signed release. `<version>` is the `versionName` in `app/build.gradle.kts`.
 
 The GitHub workflow in `.github/workflows/release.yml` has never completed a run. It was checked statically only (the YAML parses, and `scripts/check-workflow.sh` confirms pinning, permissions and that no secret appears inside a `run:` block). Its first real run may fail for reasons nobody could see in advance, such as the Android command line tools path on the runner image, or how long `cargo install cargo-ndk` takes. It creates a draft release, so nothing becomes public until you press publish.
 
@@ -48,19 +48,19 @@ export EQ_KEYSTORE_PASSWORD
 bash scripts/release-apk.sh
 ```
 
-5. Read the certificate line the script prints (`Signer #1 certificate SHA-256 digest`). It must not mention `EQ TEST ONLY`. Write the fingerprint down: people who sideload the app can compare it, and it must be identical on every future release. The APK is at `build/release/EQ-0.1.0.apk`.
+5. Read the certificate line the script prints (`Signer #1 certificate SHA-256 digest`). It must not mention `EQ TEST ONLY`. Write the fingerprint down: people who sideload the app can compare it, and it must be identical on every future release. The APK is at `build/release/EQ-<version>.apk`.
 
 6. Install it on a real phone and check these things first. None of them has ever been checked on a physical phone; every test so far ran on an Android 17 arm64 emulator.
 
 ```bash
-adb install -r build/release/EQ-0.1.0.apk
+adb install -r build/release/EQ-<version>.apk
 ```
 
    - Play audio from a real player (music or a video app). Raise a low band by a lot and confirm you hear the change. Turn the EQ off with the bypass switch and confirm it goes back.
    - If the app is not picked up automatically, turn on global mode in Settings and confirm the audio is equalized. Global mode may not work on every phone.
    - Play a video with sound and see whether the roughly 85 ms of added latency is noticeable against the picture.
    - Restart the phone, then check the app and the notification come back as you set them in Settings.
-   - Open Settings and confirm it reads Version 0.1.0.
+   - Open Settings and confirm it reads the current version.
 
 7. Encode the keystore for the secret (macOS), copying it to the clipboard:
 
@@ -68,13 +68,7 @@ adb install -r build/release/EQ-0.1.0.apk
 base64 -i ~/.eq-android/release.jks | pbcopy
 ```
 
-8. Create the GitHub repository yourself and choose its visibility. With the GitHub CLI:
-
-```bash
-gh repo create dylenq/eq-android --public --source . --remote origin
-```
-
-9. Run a secrets scan before the first push. The private key check must print nothing:
+8. Run a secrets scan before you push. The private key check must print nothing:
 
 ```bash
 git grep -nEi 'BEGIN [A-Z ]*PRIVATE KEY' -- . ':!.planning'
@@ -86,7 +80,7 @@ git grep -nEi 'BEGIN [A-Z ]*PRIVATE KEY' -- . ':!.planning'
 git grep -nEi 'storePassword'
 ```
 
-10. Add the three secrets. Each command prompts for the value (paste from the clipboard for the first):
+9. Add the three secrets. Each command prompts for the value (paste from the clipboard for the first):
 
 ```bash
 gh secret set EQ_KEYSTORE_BASE64
@@ -100,29 +94,27 @@ gh secret set EQ_KEYSTORE_PASSWORD
 gh secret set EQ_KEY_ALIAS
 ```
 
-11. Push the branch:
+10. Publish from the local `public` branch, not `main`. It tracks `github/main` and leaves out `.planning/`, `.claude/` and `docs/research/`, so pushing `main` would publish all of those. Bring the new commits onto `public` without those paths (the gsd `pr-branch` skill filters them), then:
 
 ```bash
-git push -u origin main
+git push github public:main
 ```
 
-12. Tag the release. The tag must equal `v` plus the `versionName` in `app/build.gradle.kts`; the workflow fails otherwise.
+11. Tag the release. The tag must equal `v` plus the `versionName` in `app/build.gradle.kts`; the workflow fails otherwise.
 
 ```bash
-git tag v0.1.0
+git tag v<version>
 ```
 
 ```bash
-git push origin v0.1.0
+git push github v<version>
 ```
 
-13. Watch the workflow run in the Actions tab. If it fails, fix the cause and delete and re-push the tag; remember it has never completed a run. When it succeeds it leaves a draft release with `EQ-0.1.0.apk`. Download that APK, run `apksigner verify --print-certs` on it (`apksigner` is in the Android SDK under `build-tools/36.0.0/`) and compare the fingerprint with step 5, then publish the draft.
-
-## Decision for you at publish time
-
-Whether to publish `.planning/` and `.claude/CLAUDE.md`. They are the development history: plans, research, evidence and debugging notes, plus the assistant guidance file. Publishing them shows how the app was built and where each claim comes from. Keeping them out gives a cleaner repository. If you want them out, push a branch without them (the gsd `pr-branch` skill filters `.planning` commits) instead of `main` as it is. This was left for you to decide; nothing was removed.
+12. Watch the workflow run in the Actions tab. If it fails, fix the cause and delete and re-push the tag; remember it has never completed a run. When it succeeds it leaves a draft release with `EQ-<version>.apk`. Download that APK, run `apksigner verify --print-certs` on it (`apksigner` is in the Android SDK under `build-tools/36.0.0/`) and compare the fingerprint with step 5, then publish the draft.
 
 ## Other notes
+
+- A release signed with the private key will not install over 0.2.0, which used the test key. People have to uninstall first, which deletes their settings and presets, so say so in the release notes.
 
 - `core/tests/golden/macos_response.json` (about 2 MB) is needed by the Rust tests and stays in the repository.
 - `spike-tools/` was not renamed on purpose. About 75 files and the project history refer to it by that name.

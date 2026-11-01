@@ -2,6 +2,27 @@
 
 All notable changes are listed here, in the style of Keep a Changelog.
 
+## Unreleased
+
+### Fixed
+
+- A band field's unsaved text could be written to the wrong band after the band above it was deleted.
+- The app no longer crashes when Android refuses to start the service in the background, or when the audio core fails to load. It shows an error screen in the second case.
+- When saved settings cannot be written (a full disk, for example) the app says so and retries, instead of silently losing changes after a restart.
+- Settings are flushed to disk before they replace the old file, so a power cut cannot leave an empty one.
+- A snackbar queued behind another could stay on screen forever and dismiss the wrong one.
+- Reset all showed "Undo" after a failed reset, and interfered with a drag held at the same time.
+- Switching mode with a band field focused needed a second tap.
+- The value bubble could appear over the wrong graphic slider.
+- A pinch that started as a drag could change the Q of a neighbouring band.
+- An invalid output sample rate from the phone made every attach fail. It now falls back to 48 kHz, and the curve follows output changes.
+- Ctrl+Z in a band field is left to the field. Typing in any field clears the row's error message.
+
+### Changed
+
+- Graphic curve computation is about 60% faster.
+- CI and Dependabot configuration, a Docker build environment and a keystore example. The README now covers setup, dependencies and environment variables.
+
 ## 0.2.0 - 2026-10-31
 
 Checked on an Android 17 arm64 emulator and installed on one physical phone by the author. The release APK is signed with the project's public test key, not a private release key, so a later build signed with a real key will need an uninstall first (which deletes saved settings and presets).

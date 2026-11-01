@@ -1,5 +1,5 @@
-# NOTE: this workflow has NEVER RUN. It was only validated statically (YAML parse and
-# scripts/check-workflow.sh); no GitHub repository exists yet. Assumptions that a first run
+# NOTE: this workflow has NEVER RUN to completion (the one v0.2.0 run was cancelled). It was only
+# validated statically (YAML parse and scripts/check-workflow.sh). Assumptions that a first run
 # may disprove: the cmdline-tools path on the runner, sdkmanager licence handling, the
 # cargo-ndk install time, and Gradle finding cargo in ~/.cargo/bin. It creates a DRAFT
 # release so a human inspects the APK before anything is public.

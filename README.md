@@ -100,7 +100,7 @@ Not checked (none marked as passed):
 - Real players: whether they announce an audio session, and when.
 - Global mode: whether it is audible, and whether real phones accept it.
 - Start on boot after a real restart, including a phone with a lock screen set.
-- Changing the output (Bluetooth, headphones) or the sample rate while playing.
+- Changing the output (Bluetooth, headphones) or the sample rate while playing. EQ re-applies the curve when the list of outputs changes, but that has not been tried with real hardware.
 - The themed (monochrome) app icon, TalkBack, the reduced-motion setting, dynamic colour with real wallpapers, touch and haptic feel, and different keyboards.
 - Devices on Android 9 to 11 (the fallback colours were checked in code only).
 - The release workflow in `.github/workflows/release.yml` has never completed a run (see Releasing below), and a build signed with a real release key has not been made.
@@ -118,15 +118,81 @@ It does not request `RECORD_AUDIO`, and it does not read or store your audio. Yo
 
 ## Build from source
 
-You need JDK 25, the Android SDK 37 with build-tools 36.0.0, NDK 27.1.12297006, Rust (stable) with the Android targets `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android`, and cargo-ndk.
+### Project layout
+
+| Path | What it is |
+| --- | --- |
+| `core/` | Rust crate `eq-core`: bands, presets, undo, curve fitting and state files. No Android dependencies. |
+| `uniffi-bindgen/` | Generates the Kotlin bindings for the core. |
+| `app/` | The Kotlin and Jetpack Compose app: `service/` attaches the effects, `ui/` draws the screens. |
+| `playerstub/` | Test tooling that imitates a player's audio-session broadcasts. Not part of the app. |
+| `scripts/` | Release, keystore and docs checks. |
+| `spike-tools/` | Emulator scripts: soak tests and the README screenshots. |
+
+### Prerequisites
+
+| Tool | Version |
+| --- | --- |
+| JDK | 25 (Android Studio's bundled runtime works) |
+| Android SDK | platform 37, build-tools 36.0.0 |
+| Android NDK | 27.1.12297006 |
+| Rust | stable, with targets `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android` |
+| cargo-ndk | 4.1.2 |
+
+Gradle fetches the rest. The main dependencies are Jetpack Compose and Material 3, Kotlin coroutines, UniFFI and JNA for the bridge to Rust, and serde for the state file. Versions are pinned in [app/build.gradle.kts](app/build.gradle.kts) and [core/Cargo.toml](core/Cargo.toml).
+
+### Build and test
 
 ```bash
 cargo test --workspace
 ```
 
 ```bash
+./gradlew :app:testDebugUnitTest
+```
+
+```bash
 ./gradlew :app:assembleDebug
 ```
+
+The instrumented tests need a running emulator or a connected device:
+
+```bash
+./gradlew :app:connectedDebugAndroidTest
+```
+
+The first Gradle build compiles the Rust core for all three ABIs and generates the bindings.
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs clippy, the Rust tests, the unit tests and the debug build on every pull request. It has not run yet. It skips the instrumented tests, which need an emulator with working audio effects.
+
+No toolchain? The [Dockerfile](Dockerfile) is a build environment that runs the same checks and builds the debug APK. It has not been built yet, because the development machine has no Docker. The app is an APK with no server side, so there is no hosting configuration such as `vercel.json`.
+
+```bash
+docker build -t eq-android-build .
+```
+
+```bash
+docker run --rm -v "$PWD:/src" eq-android-build
+```
+
+### Environment variables
+
+The app itself reads none at runtime. These affect the build only, and none is needed for a debug build when the SDK is in the default location.
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `JAVA_HOME` | Gradle, scripts | The JDK. `spike-tools/env.sh` sets it to Android Studio's runtime on macOS. |
+| `ANDROID_HOME` | Gradle, scripts | The Android SDK. Can also be `sdk.dir` in `local.properties`. |
+| `EQ_KEYSTORE_FILE` | Release build | Path to the release keystore. |
+| `EQ_KEYSTORE_PASSWORD` | Release build | Keystore password. |
+| `EQ_KEY_ALIAS` | Release build | Key alias. |
+| `EQ_KEY_PASSWORD` | Release build | Key password. Optional, defaults to the keystore password. |
+| `EQ_OFFLINE` | `scripts/release-apk.sh` | `1` passes `--offline` to Gradle. |
+| `EQ_BUILD_TOOLS` | `scripts/release-apk.sh` | Overrides the build-tools directory. |
+
+Instead of the four `EQ_KEY*` variables you can use a git-ignored `keystore.properties`. See [keystore.properties.example](keystore.properties.example).
+
+### Release builds
 
 A test-signed APK, named `EQ-<version>-TESTSIGNED.apk`:
 
@@ -135,8 +201,6 @@ scripts/release-apk.sh --test
 ```
 
 A real release needs your own keystore. Create one with `scripts/create-keystore.sh`, then run `scripts/release-apk.sh` with no argument. The script builds, signs and checks the APK (signature, 16 KB alignment, no debug code).
-
-`playerstub/` is test tooling that imitates a player's audio-session broadcasts. It is not part of the app.
 
 ### Releasing
 
