@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -17,6 +18,7 @@ import androidx.compose.ui.Modifier
 import com.dylenq.eq.service.EqService
 import com.dylenq.eq.ui.EqRoot
 import com.dylenq.eq.ui.EqTheme
+import com.dylenq.eq.ui.StartupErrorScreen
 
 /**
  * Host activity: starts the foreground service and shows the Compose UI. The notification permission is
@@ -34,9 +36,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         refreshPermission()
-        startForegroundService(Intent(this, EqService::class.java))
         val app = application as EqApp
-        val holder = app.uiHolder()
+        val holder = try {
+            app.uiHolder()
+        } catch (e: Exception) {
+            showStartupError(e)
+            return
+        } catch (e: LinkageError) {
+            showStartupError(e)
+            return
+        }
+        startService()
         val prefs = app.uiPrefs()
         enableEdgeToEdge()
         setContent {
@@ -54,6 +64,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun showStartupError(t: Throwable) {
+        Log.e("EQ-UI", "startup failed: ${t.javaClass.name}: ${t.message}")
+        enableEdgeToEdge()
+        setContent { EqTheme { StartupErrorScreen(t.javaClass.simpleName) } }
+    }
+
     override fun onResume() {
         super.onResume()
         refreshPermission()
@@ -64,8 +80,13 @@ class MainActivity : ComponentActivity() {
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
+    /** A refused start leaves the UI usable: the status strip reports the service as stopped and offers a retry. */
     private fun startService() {
-        startForegroundService(Intent(this, EqService::class.java))
+        try {
+            startForegroundService(Intent(this, EqService::class.java))
+        } catch (e: IllegalStateException) {
+            Log.w("EQ-UI", "service start refused: ${e.javaClass.name}: ${e.message}")
+        }
     }
 
     /** Only the rationale banner's "Allow" gets here. */

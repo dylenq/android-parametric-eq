@@ -16,6 +16,7 @@ import com.dylenq.eq.service.SettingsStore
 import com.dylenq.eq.service.StateStore
 import com.dylenq.eq.service.StoreNotice
 import com.dylenq.eq.service.SessionIntent
+import com.dylenq.eq.service.usableSampleRate
 import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -27,6 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -100,12 +102,15 @@ class EqRuntime(
         data class SetGlobal(val on: Boolean) : Command
     }
 
-    private val events = Channel<Command>(Channel.UNLIMITED)
+    // Bounded because the session receiver is exported: a flood from another app drops the oldest
+    // events instead of growing without limit. A lost close is reclaimed by the session cap.
+    private val events = Channel<Command>(EVENT_QUEUE_CAPACITY, BufferOverflow.DROP_OLDEST)
 
     /** Fires once the trailing debounce timer expires; handled on the worker. */
     private val saveTick = Channel<Unit>(Channel.CONFLATED)
     @Volatile private var needsSave = false
     private var saveTimer: Job? = null
+    private var saveFailureShown = false
 
     private val manager = EffectManager(
         factory, { currentParams() }, { publishStatus() },
@@ -209,6 +214,12 @@ class EqRuntime(
         dirty.trySend(Unit)
     }
 
+    /** Re-applies the EQ without marking it unsaved (the output device, and with it the rate, may have changed). */
+    fun reapply() {
+        if (closed) return
+        dirty.trySend(Unit)
+    }
+
     /** Runs [block] on the worker and waits up to 5 s. For tests and host debugging. */
     fun <T> inspect(block: (EffectManager) -> T): T = runBlocking {
         withTimeout(5000) { withContext(dispatcher) { block(manager) } }
@@ -258,11 +269,11 @@ class EqRuntime(
     }
 
     // Worker only: trailing debounce, each apply pushes the deadline out.
-    private fun restartSaveTimer() {
+    private fun restartSaveTimer(delayMs: Long = SAVE_DEBOUNCE_MS) {
         if (store == null) return
         saveTimer?.cancel()
         saveTimer = scope.launch {
-            delay(SAVE_DEBOUNCE_MS)
+            delay(delayMs)
             saveTick.trySend(Unit)
         }
     }
@@ -276,9 +287,15 @@ class EqRuntime(
         needsSave = false
         try {
             st.save(core)
+            saveFailureShown = false
+            _status.update { if (it.notice == SAVE_FAILED_NOTICE) it.copy(notice = null) else it }
         } catch (t: Throwable) {
             needsSave = true
             Log.w("EQ-SVC", "state save failed: ${t.javaClass.name}: ${t.message}")
+            // Once per run of failures, so a dismissed notice does not come back with every retry.
+            if (!saveFailureShown) _status.update { it.copy(notice = SAVE_FAILED_NOTICE) }
+            saveFailureShown = true
+            restartSaveTimer(SAVE_RETRY_MS)
         }
     }
 
@@ -303,9 +320,9 @@ class EqRuntime(
     // Called on the worker at apply time.
     private fun currentParams(): EngineParams {
         ensureProbed()
-        val rate = AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC)
+        val rate = usableSampleRate(AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC))
         val frameMs = controller.snapshot().frameDurationMs
-        return controller.engineParams(rate.toUInt(), frameMs)
+        return controller.engineParams(rate, frameMs)
     }
 
     // Worker only. Not an edit: no markDirty, no undo step.
@@ -328,6 +345,13 @@ class EqRuntime(
     companion object {
         /** Trailing debounce for state writes. */
         const val SAVE_DEBOUNCE_MS = 500L
+
+        /** Pause before a failed state write is tried again. */
+        const val SAVE_RETRY_MS = 5_000L
+
+        const val SAVE_FAILED_NOTICE = "Your changes could not be saved. Free up some storage on the phone."
+
+        private const val EVENT_QUEUE_CAPACITY = 256
 
         fun create(context: android.content.Context, factory: EffectFactory = RealEffectFactory()): EqRuntime =
             EqRuntime(

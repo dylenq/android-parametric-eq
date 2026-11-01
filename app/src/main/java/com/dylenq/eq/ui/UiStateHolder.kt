@@ -10,6 +10,7 @@ import com.dylenq.eq.core.FilterKind
 import com.dylenq.eq.core.InternalException
 import com.dylenq.eq.core.Snapshot
 import com.dylenq.eq.service.ServiceStatus
+import com.dylenq.eq.service.usableSampleRate
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -45,8 +46,9 @@ class UiStateHolder(val runtime: EqRuntime) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Any()
 
-    private val sampleRate: UInt =
-        AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC).toUInt()
+    // Read each time: this holder outlives output changes (headphones, Bluetooth) that can change the rate.
+    private val sampleRate: UInt
+        get() = usableSampleRate(AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC))
     private val curveTick = Channel<Unit>(Channel.CONFLATED)
 
     private val _ui = MutableStateFlow(
