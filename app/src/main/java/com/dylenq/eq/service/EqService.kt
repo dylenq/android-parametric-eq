@@ -9,9 +9,11 @@ import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioDeviceCallback
 import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.media.audiofx.AudioEffect
 import android.os.Build
 import android.os.IBinder
+import android.os.Process
 import android.util.Log
 import com.dylenq.eq.EqApp
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +28,9 @@ class EqService : Service() {
     private var receiver: BroadcastReceiver? = null
     private var scope: CoroutineScope? = null
     private var deviceCallback: AudioDeviceCallback? = null
+    private var playbackCallback: AudioManager.AudioPlaybackCallback? = null
+    private var tracking: TrackingController? = null
+    private var trackScheduler: ThreadTrackScheduler? = null
 
     /** False once start-up failed; the service then only stops itself. */
     private var running = false
@@ -73,6 +78,8 @@ class EqService : Service() {
         audio.registerAudioDeviceCallback(dc, null)
         deviceCallback = dc
 
+        startTracking(app, audio)
+
         // Keep the notification text in step with the runtime; StateFlow is conflated, plus a pause = about 4 updates/s.
         val nm = getSystemService(NotificationManager::class.java)
         val sc = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -86,6 +93,36 @@ class EqService : Service() {
                 }
                 delay(NOTIFY_PAUSE_MS)
             }
+        }
+    }
+
+    /** Advanced player tracking: finds players that never announce. Errors here never stop the service. */
+    private fun startTracking(app: EqApp, audio: AudioManager) {
+        try {
+            val rt = app.runtime()
+            val sched = ThreadTrackScheduler()
+            val sink = object : TrackingSink {
+                override fun postTracked(opens: List<TrackedRow>, closes: List<Int>) = rt.postTracked(opens, closes)
+                override fun setTrackingState(state: TrackingState) = rt.setTrackingState(state)
+            }
+            val c = TrackingController(
+                sched, AudioFlingerDump.create(this), { AudioFlingerDump.hasDump(this) },
+                PackageAppResolver(packageManager), Process.myUid(), sink,
+            )
+            val pc = object : AudioManager.AudioPlaybackCallback() {
+                override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>) {
+                    try { c.onPlaybackChanged(configs.size) } catch (t: Throwable) { Log.w(TAG, "tracking change failed: ${t.javaClass.name}") }
+                }
+            }
+            audio.registerAudioPlaybackCallback(pc, null)
+            trackScheduler = sched
+            tracking = c
+            playbackCallback = pc
+            rt.trackingControl = c
+            c.onPlaybackChanged(audio.activePlaybackConfigurations.size)
+            c.setEnabled(rt.settings.playerTracking)
+        } catch (t: Throwable) {
+            Log.w(TAG, "tracking start failed: ${t.javaClass.name}")
         }
     }
 
@@ -107,6 +144,13 @@ class EqService : Service() {
         scope = null
         try { receiver?.let { unregisterReceiver(it) } } catch (_: Throwable) {}
         receiver = null
+        (application as EqApp).peekRuntime()?.trackingControl = null
+        try { tracking?.stop() } catch (t: Throwable) { Log.w(TAG, "tracking stop failed: ${t.javaClass.name}") }
+        tracking = null
+        trackScheduler?.shutdown()
+        trackScheduler = null
+        playbackCallback?.let { getSystemService(AudioManager::class.java).unregisterAudioPlaybackCallback(it) }
+        playbackCallback = null
         deviceCallback?.let { getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(it) }
         deviceCallback = null
         (application as EqApp).peekRuntime()?.let {

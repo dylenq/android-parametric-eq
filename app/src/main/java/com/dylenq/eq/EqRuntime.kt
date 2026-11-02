@@ -19,6 +19,7 @@ import com.dylenq.eq.service.storeNoticeText
 import com.dylenq.eq.service.SessionIntent
 import com.dylenq.eq.service.SessionSource
 import com.dylenq.eq.service.TrackedRow
+import com.dylenq.eq.service.TrackingControl
 import com.dylenq.eq.service.TrackingState
 import com.dylenq.eq.service.usableSampleRate
 import java.io.File
@@ -252,6 +253,20 @@ class EqRuntime(
     }
 
     fun setStartOnBoot(on: Boolean) { settings.startOnBoot = on }
+
+    /** Set by the service while it runs; null otherwise. */
+    @Volatile var trackingControl: TrackingControl? = null
+
+    /** Persists the advanced player tracking switch and tells the service's controller. */
+    fun setPlayerTracking(on: Boolean) {
+        if (closed) return
+        settings.playerTracking = on
+        val c = trackingControl
+        if (c != null) c.setEnabled(on) else setTrackingState(if (on) TrackingState.NeedsPermission else TrackingState.Off)
+    }
+
+    /** The DUMP permission may have changed (resume, a grant); the controller checks again. */
+    fun recheckTracking() { trackingControl?.recheckPermission() }
 
     /** Persists the choice and asks the worker to apply it. Turning it on clears an old notice. */
     fun setGlobalMode(on: Boolean) {

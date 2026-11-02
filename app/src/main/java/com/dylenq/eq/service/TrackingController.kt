@@ -12,6 +12,12 @@ interface TrackingSink {
     fun setTrackingState(state: TrackingState)
 }
 
+/** What the runtime calls when the switch or the permission changes. */
+interface TrackingControl {
+    fun setEnabled(on: Boolean)
+    fun recheckPermission()
+}
+
 /** The real scheduler: one thread named "eq-tracker", never the effect worker. */
 class ThreadTrackScheduler : TrackScheduler {
     private val exec = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
@@ -42,7 +48,7 @@ class TrackingController(
     private val resolver: AppResolver,
     private val ownUid: Int,
     private val sink: TrackingSink,
-) {
+) : TrackingControl {
     private val lock = Any()
     private val tracker = PlayerTracker()
     private var enabled = false
@@ -50,7 +56,7 @@ class TrackingController(
     private var cancels = ArrayList<() -> Unit>()
     private var periodic: (() -> Unit)? = null
 
-    fun setEnabled(on: Boolean) {
+    override fun setEnabled(on: Boolean) {
         synchronized(lock) {
             if (on == enabled) return
             enabled = on
@@ -81,7 +87,7 @@ class TrackingController(
     }
 
     /** Call when the permission may have changed (resume, a grant, a revoke). */
-    fun recheckPermission() {
+    override fun recheckPermission() {
         synchronized(lock) {
             if (!enabled) return
             if (!permission()) {
@@ -97,6 +103,7 @@ class TrackingController(
     }
 
     fun stop() = setEnabled(false)
+
 
     private fun burst() {
         for (c in cancels) c()

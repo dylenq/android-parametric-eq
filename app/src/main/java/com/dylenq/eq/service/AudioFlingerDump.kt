@@ -128,3 +128,12 @@ internal fun audioFlingerDumper(): BinderDumper? = try {
 } catch (t: Throwable) {
     null
 }
+
+/** The real [AppResolver]: launcher entries and uid-to-package through PackageManager. */
+class PackageAppResolver(private val pm: android.content.pm.PackageManager) : AppResolver {
+    override fun launchable(pkg: String): Boolean =
+        try { pm.getLaunchIntentForPackage(pkg) != null } catch (_: Throwable) { false }
+
+    override fun packagesForUid(uid: Int): List<String> =
+        try { pm.getPackagesForUid(uid)?.toList() ?: emptyList() } catch (_: Throwable) { emptyList() }
+}

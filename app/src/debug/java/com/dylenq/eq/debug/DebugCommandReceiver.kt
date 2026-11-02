@@ -52,6 +52,7 @@ class DebugCommandReceiver : BroadcastReceiver() {
                 "set-limiter" -> c.edit { it.setLimiterEnabled(on(intent)) }
                 "set-bypass" -> c.setBypass(on(intent))
                 "set-global" -> rt.setGlobalMode(on(intent))
+                "set-tracking" -> rt.setPlayerTracking(on(intent))
                 "set-max-bands" -> rt.overrideEngineBandCap(intent.getIntExtra("value", -1).takeIf { it > 0 })
                 "set-start-on-boot" -> rt.setStartOnBoot(on(intent))
                 // Preset keys are "builtin:<name>" or "user:<name>". These skip the UI's name checks.
@@ -108,6 +109,8 @@ class DebugCommandReceiver : BroadcastReceiver() {
             "hash=$hash bypass=${s.bypass} mode=${s.mode} preamp=${s.preampDb} g3=${s.graphicGainsDb.getOrNull(3)} " +
                 "globalMode=${rt.settings.globalMode} startOnBoot=${rt.settings.startOnBoot} " +
                 "maxBands=${rt.activeEngineBandCap ?: "none"} sessions=${st.sessionCount} nonce=$nonce canUndo=${s.canUndo} bands=${s.bands.size} " +
+                "tracking=${st.tracking.javaClass.simpleName} " +
+                "rows=${st.sessions.joinToString(";") { "${it.pkg}/${it.state}/tracked=${it.tracked}" }} " +
                 "first=${s.bands.take(4).joinToString(";") { "${it.freq}/${it.gainDb}/${it.q}/${it.kind}/${it.enabled}" }}",
         )
     }
