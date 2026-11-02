@@ -9,6 +9,7 @@ All notable changes are listed here, in the style of Keep a Changelog.
 - Per-app control in Settings. The new Apps section lists the apps EQ has seen. Each one has a switch to turn EQ off for that app and a picker to give it its own preset instead of the live EQ. Global mode ignores these settings.
 - Device presets. The new Output devices section in Settings lists the speakers and headphones EQ has seen. Give a device a preset and it is applied to the live EQ when you switch to that device. A device with no preset keeps the current sound.
 - A Quick Settings tile that turns EQ on and off. It works even when the EQ service is not running.
+- Import and export of AutoEq files from the preset list. Import reads a ParametricEQ.txt or GraphicEQ.txt as a new preset and tells you how many filters were read and how many were skipped or clamped. Export saves the parametric EQ as a ParametricEQ.txt. Bass, treble and balance are not saved in the file, and Export is only available in parametric mode.
 
 ### Fixed
 
