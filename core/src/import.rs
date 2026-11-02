@@ -113,7 +113,8 @@ fn graphic_points(line: &str) -> (Vec<(f64, f64)>, usize) {
             _ => None,
         };
         match point {
-            Some((f, g)) if f.is_finite() && g.is_finite() && f > 0.0 => points.push((f, g)),
+            // Bounded far outside the slider range, so averaging huge values cannot overflow to NaN.
+            Some((f, g)) if f.is_finite() && g.is_finite() && f > 0.0 => points.push((f, g.clamp(-1e6, 1e6))),
             _ => skipped += 1,
         }
     }
@@ -398,6 +399,14 @@ Filter 4: ON HSC Fc 10000 Hz Gain -3.0 dB Q 0.70
             );
             assert!(g.graphic_gains[0] > g.graphic_gains[count as usize - 1]);
         }
+    }
+
+    #[test]
+    fn absurdly_large_points_clamp_instead_of_failing_the_import() {
+        // Interpolating between +1e308 and -1e308 overflows to NaN unless the points are bounded.
+        let g = parse_any("GraphicEQ: 100 1e308; 200 -1e308; 400 1e308\n", 10).unwrap();
+        assert!(g.graphic_gains.iter().all(|v| v.abs() <= GRAPHIC_MAX_DB));
+        assert!(g.clamped > 0);
     }
 
     #[test]
