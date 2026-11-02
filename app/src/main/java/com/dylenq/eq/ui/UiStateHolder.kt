@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -113,7 +114,16 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
     /** Opens [source]'s share of the group; a second start from the same source is ignored. */
     private fun beginGesture(source: Source) {
         if (source in openSources) return
-        if (gestureDepth == 0) controller.beginEdit()
+        if (gestureDepth == 0) {
+            // First, so a device preset the runtime is applying finishes before the group opens (D-05).
+            runtime.setGestureOpen(true)
+            try {
+                controller.beginEdit()
+            } catch (e: Exception) {
+                runtime.setGestureOpen(false)
+                throw e
+            }
+        }
         openSources.add(source)
         gestureDepth++
         _ui.update { it.copy(gestureOpen = true) }
@@ -128,6 +138,8 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
                 controller.endEdit()
             } finally {
                 _ui.update { it.copy(gestureOpen = false) }
+                // After the group closed: a device preset that waited applies now, as its own step.
+                runtime.setGestureOpen(false)
             }
         }
     }
@@ -145,7 +157,20 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
                 refreshCurve()
             }
         }
+        // The runtime changed the core on its own (a device preset): re-read it and say so.
+        scope.launch { runtime.coreRevision.drop(1).collect { onRuntimeChangedCore() } }
         refreshCurve()
+    }
+
+    private fun onRuntimeChangedCore() {
+        val applied = runtime.takeRouteApply()
+        synchronized(lock) {
+            // Moves the serial, so an older "Applied" or "Reset all" Undo can no longer undo this change.
+            edited()
+            _ui.update { it.copy(selectedBand = null, lastTouchedBand = null) }
+            republishLocked(freshIds = true)
+            if (applied != null) emit("${applied.preset} applied for ${applied.device}", undoable = applied.recorded)
+        }
     }
 
     /** Asks for a curve recompute; cheap and safe from any thread. */

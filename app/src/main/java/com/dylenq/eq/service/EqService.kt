@@ -74,9 +74,12 @@ class EqService : Service() {
 
         // A new output (headphones, Bluetooth) can change the sample rate the curve is fitted to.
         val audio = getSystemService(AudioManager::class.java)
-        val dc = OutputRouteCallback { app.runtime().reapply() }
+        // It also decides which device preset, if any, to apply (debounced in the runtime).
+        val dc = OutputRouteCallback { app.runtime().onRouteChanged() }
         audio.registerAudioDeviceCallback(dc, null)
         deviceCallback = dc
+        // Record the output in use now, so a restart on another device is noticed.
+        app.runtime().onRouteChanged()
 
         startTracking(app, audio)
 

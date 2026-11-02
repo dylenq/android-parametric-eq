@@ -6,8 +6,12 @@ import android.media.AudioTrack
 import android.util.Log
 import com.dylenq.eq.core.EngineParams
 import com.dylenq.eq.core.EqCore
+import com.dylenq.eq.core.EqException
 import com.dylenq.eq.service.EffectFactory
+import com.dylenq.eq.service.AudioManagerRoute
+import com.dylenq.eq.service.Debouncer
 import com.dylenq.eq.service.EngineProbe
+import com.dylenq.eq.service.OutputRoute
 import com.dylenq.eq.service.RealEngineProbe
 import com.dylenq.eq.service.AppEntry
 import com.dylenq.eq.service.EffectManager
@@ -59,6 +63,10 @@ class EqRuntime(
     val settings: SettingsStore = SettingsStore(null),
     /** Null means no probe: the core stays uncapped. Before [saver] so trailing-lambda callers keep working. */
     private val probe: EngineProbe? = null,
+    /** Null means no route source: route events only re-apply, no device is recorded. */
+    private val route: OutputRoute? = null,
+    /** Quiet time before a burst of route events is handled; tests shorten it. */
+    private val routeDebounceMs: Long = Debouncer.ROUTE_DEBOUNCE_MS,
     saver: ((EqCore, String) -> Unit)? = null,
 ) {
     private val store: StateStore? = stateDir?.let { d ->
@@ -154,6 +162,24 @@ class EqRuntime(
         ServiceStatus(bypass = controller.snapshot().bypass, globalMode = settings.globalMode, engineMaxBands = measuredCap(), tracking = if (settings.playerTracking) TrackingState.Working(0) else TrackingState.Off, notice = storeNoticeText(opened.second))
     )
     val status: StateFlow<ServiceStatus> = _status.asStateFlow()
+
+    /** What the runtime applied to the live EQ because the output changed; read by the UI for its notice. */
+    data class RouteApply(val preset: String, val device: String, val recorded: Boolean)
+
+    private val _coreRevision = MutableStateFlow(0)
+
+    /** Bumps after every change the runtime itself makes to the core, so an open UI can re-read it. */
+    val coreRevision: StateFlow<Int> = _coreRevision.asStateFlow()
+    @Volatile private var routeApply: RouteApply? = null
+
+    /** The latest [RouteApply] since the last call, or null. */
+    fun takeRouteApply(): RouteApply? = synchronized(gestureLock) { routeApply.also { routeApply = null } }
+
+    // Guards the gesture flag against the worker applying a device preset: while the flag is set no apply
+    // starts, and a gesture cannot open while one runs (D-05).
+    private val gestureLock = Any()
+    private var gestureOpen = false
+    private var pendingDevice: Pair<String, String>? = null
 
     /** Invoked on the worker after every apply. The persistence plan fills this in. */
     @Volatile var onApplied: () -> Unit = {}
@@ -265,6 +291,82 @@ class EqRuntime(
         dirty.trySend(Unit)
     }
 
+    /**
+     * The output may have changed. Debounced (D-08); then the device is recorded, its preset applied to the
+     * live EQ when one is due (D-02, D-03), and the EQ re-applied for the new output. Safe from any thread.
+     */
+    fun onRouteChanged() {
+        if (closed) return
+        routeDebouncer.trigger()
+    }
+
+    private val routeDebouncer = Debouncer(
+        routeDebounceMs,
+        { ms, f ->
+            val j = scope.launch {
+                delay(ms)
+                f()
+            }
+            ({ j.cancel() })
+        },
+        { handleRoute() },
+    )
+
+    /**
+     * The UI holder reports its undo group opening or closing. A device preset that came due while a
+     * gesture was open applies once, right after it ends; the gesture itself is never touched.
+     */
+    fun setGestureOpen(open: Boolean) {
+        val due = synchronized(gestureLock) {
+            gestureOpen = open
+            if (!open) pendingDevice.also { pendingDevice = null } else null
+        }
+        if (due != null && !closed) scope.launch { applyDevicePreset(due.first, due.second) }
+    }
+
+    // Worker only.
+    private fun handleRoute() {
+        try {
+            val info = route?.current()
+            if (info != null) {
+                val key = controller.recordDevice(info.key, info.name)
+                needsSave = true
+                restartSaveTimer()
+                if (key != null) {
+                    val deferred = synchronized(gestureLock) {
+                        if (gestureOpen) { pendingDevice = key to info.name; true } else false
+                    }
+                    if (!deferred) applyDevicePreset(key, info.name)
+                }
+            }
+        } catch (t: Throwable) {
+            Log.w("EQ-SVC", "route handling failed: ${t.javaClass.name}: ${t.message}")
+        }
+        reapply()
+    }
+
+    // Worker only. Goes through the same apply_preset path as the UI: one undo step.
+    private fun applyDevicePreset(presetKey: String, device: String) {
+        val name = controller.snapshot().presets.firstOrNull { it.key == presetKey }?.name
+        val recorded = try {
+            synchronized(gestureLock) {
+                if (gestureOpen) {
+                    pendingDevice = presetKey to device
+                    return
+                }
+                controller.applyPreset(presetKey)
+            }
+        } catch (e: EqException.NotFound) {
+            Log.w("EQ-SVC", "device preset no longer exists")
+            return
+        } catch (t: Throwable) {
+            Log.w("EQ-SVC", "device preset apply failed: ${t.javaClass.name}: ${t.message}")
+            return
+        }
+        routeApply = RouteApply(name ?: presetKey, device, recorded)
+        _coreRevision.update { it + 1 }
+    }
+
     /** Runs [block] on the worker and waits up to 5 s. For tests and host debugging. */
     fun <T> inspect(block: (EffectManager) -> T): T = runBlocking {
         withTimeout(5000) { withContext(dispatcher) { block(manager) } }
@@ -326,6 +428,7 @@ class EqRuntime(
 
     fun shutdown() {
         if (closed) return
+        routeDebouncer.cancel()
         try {
             inspect {
                 it.releaseAll()
@@ -470,6 +573,7 @@ class EqRuntime(
             EqRuntime(
                 factory, context.filesDir, SettingsStore(context),
                 probe = RealEngineProbe(context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager),
+                route = AudioManagerRoute(context.getSystemService(android.content.Context.AUDIO_SERVICE) as AudioManager),
             )
     }
 }

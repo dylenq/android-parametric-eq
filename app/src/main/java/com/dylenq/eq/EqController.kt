@@ -4,6 +4,7 @@ import com.dylenq.eq.core.CurveData
 import com.dylenq.eq.core.EngineParams
 import com.dylenq.eq.core.EqCore
 import com.dylenq.eq.core.AppRuleInfo
+import com.dylenq.eq.core.DeviceRuleInfo
 import com.dylenq.eq.core.Snapshot
 
 /**
@@ -88,4 +89,19 @@ class EqController internal constructor(
 
     /** Restores the default bands and 0 dB preamp as one undo step. */
     fun resetBands() = edit { it.resetBands() }
+
+    /** Read-only: every per-device rule. */
+    fun deviceRules(): List<DeviceRuleInfo> = core.deviceRules()
+
+    /**
+     * Records the output now in use and returns the preset to apply, if the device changed and has one.
+     * Not an edit: the caller saves through the debounce and applies the preset itself.
+     */
+    fun recordDevice(key: String, name: String): String? = core.recordDevice(key, name)
+
+    /** Null keeps the current sound on that device; a key that does not resolve throws. */
+    fun setDevicePreset(key: String, presetKey: String?) = edit { it.setDevicePreset(key, presetKey) }
+
+    /** Applies preset [key] as one undo step. True when the core recorded a step. */
+    fun applyPreset(key: String): Boolean = edit { it.applyPreset(key) }
 }
