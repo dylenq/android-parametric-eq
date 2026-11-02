@@ -1,6 +1,7 @@
 package com.dylenq.eq.ui
 
 import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,9 +23,11 @@ import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
+import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.dylenq.eq.EqApp
+import com.dylenq.eq.MainActivity
 import com.dylenq.eq.testsupport.EqComposeRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -251,6 +254,21 @@ class LayoutTest {
         }
     }
 
+    /**
+     * Waits for the recreated activity without touching Compose: asking the test rule for nodes while the
+     * activity is being replaced could leave its idle wait spinning forever.
+     */
+    private fun awaitOrientation(scenario: ActivityScenario<MainActivity>, orientation: Int) {
+        val deadline = System.currentTimeMillis() + 10_000
+        while (System.currentTimeMillis() < deadline) {
+            var current = Configuration.ORIENTATION_UNDEFINED
+            scenario.onActivity { current = it.resources.configuration.orientation }
+            if (current == orientation) return
+            Thread.sleep(100)
+        }
+        throw AssertionError("The activity never reached orientation $orientation")
+    }
+
     @Test fun rotationSwitchesBetweenColumnAndTwoPanesAndKeepsState() {
         val scenario = rule.launch()
         compose.waitForIdle()
@@ -261,20 +279,14 @@ class LayoutTest {
         compose.waitForIdle()
         try {
             scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
-            val deadline = System.currentTimeMillis() + 10_000
-            while (compose.onAllNodes(hasTestTag("two-pane")).fetchSemanticsNodes().isEmpty() && System.currentTimeMillis() < deadline) {
-                Thread.sleep(100)
-                compose.waitForIdle()
-            }
+            awaitOrientation(scenario, Configuration.ORIENTATION_LANDSCAPE)
+            compose.waitForIdle()
             node("two-pane").assertExists()
             assertEquals(3f, rule.runtime.controller.snapshot().graphicGainsDb[2], 0.01f)
             assertEquals(15, rule.runtime.controller.snapshot().graphicBandCount.toInt())
             scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
-            val d2 = System.currentTimeMillis() + 10_000
-            while (compose.onAllNodes(hasTestTag("eq-column")).fetchSemanticsNodes().isEmpty() && System.currentTimeMillis() < d2) {
-                Thread.sleep(100)
-                compose.waitForIdle()
-            }
+            awaitOrientation(scenario, Configuration.ORIENTATION_PORTRAIT)
+            compose.waitForIdle()
             node("eq-column").assertExists()
             assertEquals(15, rule.runtime.controller.snapshot().graphicBandCount.toInt())
         } finally {
