@@ -15,7 +15,9 @@ object SessionCopy {
 
     fun rowTitle(pkg: String): String = if (pkg.isBlank()) "Unknown app" else pkg
 
-    fun supporting(info: SessionInfo): String = "Session ${info.id} · ${stateText(info.state)}"
+    /** [presetName] is the app's own preset, or null when it follows the live EQ. */
+    fun supporting(info: SessionInfo, presetName: String? = null): String =
+        "Session ${info.id} · ${stateText(info.state)}" + if (presetName != null) " · $presetName" else ""
 
     fun countText(n: Int): String = if (n == 1) "1 session" else "$n sessions"
 

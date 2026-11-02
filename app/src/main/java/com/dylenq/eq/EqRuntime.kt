@@ -399,7 +399,7 @@ class EqRuntime(
             val sessions = manager.sessionInfos()
             val apps = controller.appRules().map { r ->
                 val live = sessions.firstOrNull { s -> s.pkg == r.pkg }
-                AppEntry(r.pkg, r.enabled, r.presetKey, r.pkg, live != null, live?.state)
+                AppEntry(r.pkg, r.enabled, r.presetKey, r.pkg, live != null, live?.state, r.lastSeen.toLong())
             }
             _status.update {
                 it.copy(

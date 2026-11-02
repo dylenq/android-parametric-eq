@@ -14,6 +14,8 @@ data class AppEntry(
     val name: String,
     val playingNow: Boolean,
     val state: SessionState?,
+    /** The core's recency counter; larger is more recent. */
+    val lastSeen: Long = 0,
 )
 
 /** [tracked]: found by advanced player tracking instead of the app's own broadcast. */
