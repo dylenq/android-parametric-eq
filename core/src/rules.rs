@@ -317,6 +317,17 @@ mod tests {
     }
 
     #[test]
+    fn a_huge_rules_list_counts_every_rule_it_cuts() {
+        let items: Vec<String> = (0..200)
+            .map(|i| format!(r#"{{"pkg":"p.{i}","enabled":true,"preset_key":null,"last_seen":{i}}}"#))
+            .collect();
+        let json = format!(r#"{{"version":1,"app_rules":[{}]}}"#, items.join(","));
+        let l = persist::parse(json.as_bytes()).unwrap();
+        assert_eq!(l.app_rules().len(), MAX_APP_RULES);
+        assert_eq!(l.load_repairs, 200 - MAX_APP_RULES as u32);
+    }
+
+    #[test]
     fn bad_packages_and_stale_keys_are_repaired_on_load() {
         let json = r#"{"version":1,"app_rules":[
             {"pkg":"","enabled":true,"preset_key":null,"last_seen":1},

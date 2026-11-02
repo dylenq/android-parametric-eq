@@ -280,18 +280,24 @@ fn read_presets(raw: Option<Value>, repairs: &mut u32) -> Vec<Preset> {
 fn read_app_rules(raw: Option<Value>, repairs: &mut u32) -> Vec<AppRule> {
     match raw {
         None => Vec::new(),
-        Some(Value::Array(items)) => items
-            .into_iter()
-            // Past twice the limit nothing is parsed: the rest is cut by `sanitize` and counted.
-            .take(MAX_APP_RULES * 2)
-            .filter_map(|v| match serde_json::from_value::<AppRule>(v) {
-                Ok(r) => Some(r),
-                Err(_) => {
-                    count(repairs);
-                    None
-                }
-            })
-            .collect(),
+        Some(Value::Array(items)) => {
+            // Past twice the limit nothing is parsed: the rest is cut here and counted.
+            let skipped = items.len().saturating_sub(MAX_APP_RULES * 2);
+            for _ in 0..skipped {
+                count(repairs);
+            }
+            items
+                .into_iter()
+                .take(MAX_APP_RULES * 2)
+                .filter_map(|v| match serde_json::from_value::<AppRule>(v) {
+                    Ok(r) => Some(r),
+                    Err(_) => {
+                        count(repairs);
+                        None
+                    }
+                })
+                .collect()
+        }
         Some(_) => {
             count(repairs);
             Vec::new()
