@@ -4,7 +4,7 @@ All notable changes are listed here, in the style of Keep a Changelog.
 
 ## 0.3.0 - 2026-11-03
 
-Checked on an Android 17 arm64 emulator only; this version has not been on a physical phone. The release APK is signed with the project's public test key. Real players, a real Shizuku server, real headphones, Bluetooth and USB outputs, the system file picker and how any of this sounds are not verified. The README has the full list.
+Checked on an Android 17 arm64 emulator only; this version has not been on a physical phone. The release APK is signed with the project's public test key. Real players, a real Shizuku server, real headphones, Bluetooth and USB outputs, cloud storage in the file picker and how any of this sounds are not verified. The README has the full list.
 
 ### Added
 

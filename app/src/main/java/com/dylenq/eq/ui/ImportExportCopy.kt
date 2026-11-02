@@ -18,9 +18,10 @@ internal object ImportExportCopy {
     /** The system document picker for an EQ file. Documents the user picks need no storage permission. */
     fun openDocumentIntent(): Intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
         addCategory(Intent.CATEGORY_OPENABLE)
-        type = "text/*"
-        // Some providers label plain text files as octet-stream.
-        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/octet-stream"))
+        // The extra replaces the type when the picker filters, so text has to be listed in it too. Some
+        // providers label plain text files as octet-stream.
+        type = "*/*"
+        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/*", "application/octet-stream"))
     }
 
     /** The system "save as" picker, proposing "<preset or EQ> ParametricEQ.txt". */

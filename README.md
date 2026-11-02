@@ -132,7 +132,7 @@ Not checked (none marked as passed):
 - The "reboot once" state against a real refusal, tracking on Android versions other than 17, and session tables on phone makers' builds.
 - How per-app and device presets sound. The emulator has no audio output, so the parameters sent were checked, not the sound.
 - Device presets with real headphones, Bluetooth or USB. These ran through a fake output source; only the emulator's speaker was seen for real.
-- The system file picker for AutoEq import and export, and files from cloud storage. Tests used the same file streams without the picker.
+- AutoEq import and export with cloud storage. Both were run through the system file picker on the emulator with the release APK, using the Downloads folder only.
 - Real AutoEq downloads. The files tested have the same shape but were written for the tests.
 - The look of the Quick Settings tile in a real phone's panel. Tile clicks were checked on the emulator.
 - Global mode: whether it is audible, and whether real phones accept it.
@@ -150,6 +150,7 @@ EQ declares no network permission. The merged manifest of the built release APK 
 - `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_SPECIAL_USE`: to keep the equalizer service running.
 - `POST_NOTIFICATIONS`: to show the service notification (Android 13 and later).
 - `RECEIVE_BOOT_COMPLETED`: for the optional start on boot setting.
+- `moe.shizuku.manager.permission.API_V23`: added by the Shizuku library, for the optional grant through Shizuku. `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` is an internal one the build tools add.
 - `DUMP`: only for advanced player tracking, and only once you grant it yourself. Android does not grant it on install. With it, EQ asks the audio server for its status report and uses only the table of audio sessions: session number, process, user id and app name. That report is read in memory, is not saved or sent anywhere, and is never requested unless the setting is on and the permission is granted.
 
 The Shizuku library is included for the optional grant. EQ only ever asks Shizuku to run that one grant command for its own package.

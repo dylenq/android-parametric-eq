@@ -113,9 +113,9 @@ class ImportExportSheetTest {
     @Test fun openDocumentIntentAsksForTextFilesWithoutAStoragePermission() {
         val i = ImportExportCopy.openDocumentIntent()
         assertEquals(Intent.ACTION_OPEN_DOCUMENT, i.action)
-        assertEquals("text/*", i.type)
+        assertEquals("*/*", i.type)
         assertTrue(i.categories.contains(Intent.CATEGORY_OPENABLE))
-        assertArrayEquals(arrayOf("application/octet-stream"), i.getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
+        assertArrayEquals(arrayOf("text/*", "application/octet-stream"), i.getStringArrayExtra(Intent.EXTRA_MIME_TYPES))
     }
 
     @Test fun createDocumentIntentIsNamedAfterThePreset() {
