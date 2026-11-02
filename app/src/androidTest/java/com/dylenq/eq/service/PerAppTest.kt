@@ -204,7 +204,8 @@ class PerAppTest {
         open(1, "com.a")
         assertTrue(poll { appRule("com.a") != null })
         val a = appRule("com.a")!!
-        assertEquals(AppEntry("com.a", true, null, "com.a", true, SessionState.OK), a)
+        assertEquals(AppEntry("com.a", true, null, "com.a", true, SessionState.OK), a.copy(lastSeen = 0))
+        assertTrue(a.lastSeen > 0)
         close(1)
         assertTrue(poll { appRule("com.a")?.playingNow == false })
         assertEquals(null, appRule("com.a")?.state)
