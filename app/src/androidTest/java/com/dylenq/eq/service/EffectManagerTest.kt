@@ -392,4 +392,80 @@ class EffectManagerTest {
         assertEquals(0, mgr.sessionCount())
         assertSame(null, mgr.handleFor(1))
     }
+
+    private fun tracked(session: Int) = mgr.sessionInfos().single { it.id == session }.tracked
+
+    @Test
+    fun announced_and_tracked_open_attach_once_and_a_tracker_close_keeps_the_session() {
+        mgr.onOpen(1, "com.a.b")
+        mgr.onOpen(1, "com.a.b", SessionSource.TRACKED)
+        assertEquals(1, fake.callCount(1, "create"))
+        assertFalse(tracked(1))
+        mgr.onClose(1, SessionSource.TRACKED)
+        assertNotNull(mgr.handleFor(1))
+        assertFalse(fake.handle(1)!!.released)
+    }
+
+    @Test
+    fun tracker_only_session_is_released_by_a_tracker_close_and_marked_tracked() {
+        mgr.onOpen(2, "com.a.b", SessionSource.TRACKED)
+        assertTrue(tracked(2))
+        val h = fake.handle(2)!!
+        mgr.onClose(2, SessionSource.TRACKED)
+        assertTrue(h.released)
+        assertNull(mgr.handleFor(2))
+    }
+
+    @Test
+    fun an_announced_open_after_the_tracker_takes_over_the_session() {
+        mgr.onOpen(3, "com.a.b", SessionSource.TRACKED)
+        mgr.onOpen(3, "com.a.b")
+        assertFalse(tracked(3))
+        mgr.onClose(3, SessionSource.TRACKED)
+        assertNotNull(mgr.handleFor(3))
+    }
+
+    @Test
+    fun an_app_close_releases_a_tracker_opened_session() {
+        mgr.onOpen(4, "com.a.b", SessionSource.TRACKED)
+        val h = fake.handle(4)!!
+        mgr.onClose(4)
+        assertTrue(h.released)
+    }
+
+    @Test
+    fun source_rules_hold_while_global_mode_is_on() {
+        mgr.setGlobalMode(true)
+        mgr.onOpen(5, "com.a.b")
+        mgr.onOpen(5, "com.a.b", SessionSource.TRACKED)
+        mgr.onOpen(6, "com.c.d", SessionSource.TRACKED)
+        val infos = mgr.sessionInfos().associateBy { it.id }
+        assertFalse(infos.getValue(5).tracked)
+        assertTrue(infos.getValue(6).tracked)
+        mgr.onClose(5, SessionSource.TRACKED)
+        mgr.onClose(6, SessionSource.TRACKED)
+        assertEquals(listOf(5), mgr.sessionInfos().map { it.id })
+        mgr.setGlobalMode(false)
+        assertNotNull(mgr.handleFor(5))
+    }
+
+    @Test
+    fun the_tracked_flag_survives_global_mode_on_and_off() {
+        mgr.onOpen(7, "com.a.b", SessionSource.TRACKED)
+        mgr.setGlobalMode(true)
+        mgr.setGlobalMode(false)
+        assertTrue(tracked(7))
+    }
+
+    @Test
+    fun announced_sessions_behave_the_same_with_a_tracker_feeding_the_manager() {
+        mgr.onOpen(8, "com.a.b")
+        mgr.onOpen(9, "com.c.d", SessionSource.TRACKED)
+        current = withGain(base, 0, 3f)
+        mgr.applyLatest()
+        assertTrue(mutators(8).isNotEmpty())
+        mgr.onClose(8)
+        assertNull(mgr.handleFor(8))
+        assertNotNull(mgr.handleFor(9))
+    }
 }

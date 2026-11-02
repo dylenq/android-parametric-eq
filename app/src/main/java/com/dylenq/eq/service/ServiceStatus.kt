@@ -3,7 +3,8 @@ package com.dylenq.eq.service
 /** SUPPRESSED: tracked while global mode is on, no per-session effect attached. */
 enum class SessionState { OK, NO_CONTROL, FAILED, SUPPRESSED }
 
-data class SessionInfo(val id: Int, val pkg: String, val state: SessionState)
+/** [tracked]: found by advanced player tracking instead of the app's own broadcast. */
+data class SessionInfo(val id: Int, val pkg: String, val state: SessionState, val tracked: Boolean = false)
 
 /** Immutable snapshot published by the runtime. Notice carries store and global-mode messages. */
 data class ServiceStatus(
@@ -16,4 +17,6 @@ data class ServiceStatus(
     val serviceRunning: Boolean = false,
     /** Measured engine band count for this OS build, or null when not measured yet. */
     val engineMaxBands: Int? = null,
+    /** State of advanced player tracking (Settings). */
+    val tracking: TrackingState = TrackingState.Off,
 )

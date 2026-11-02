@@ -5,6 +5,9 @@ import com.dylenq.eq.core.EngineParams
 import com.dylenq.eq.core.LimiterParams
 import kotlin.math.abs
 
+/** Who told the manager about a session: the app's own broadcast, or the player tracker. */
+enum class SessionSource { ANNOUNCED, TRACKED }
+
 /**
  * Session map and effect attach/release. Worker-confined: only the "eq-effects" thread may call
  * these methods (tests go through EqRuntime.inspect). No call here ever throws.
@@ -32,6 +35,8 @@ class EffectManager(
         var lastSeen: Long,
         p: EngineParams,
         var state: SessionState,
+        /** True once the app announced this session; a tracker close then leaves it alone. */
+        var announced: Boolean,
     ) {
         val gains: FloatArray = p.gainsDb.toFloatArray()
         var inputGainL: Float = p.inputGainLeftDb
@@ -42,51 +47,59 @@ class EffectManager(
     }
 
     private val sessions = LinkedHashMap<Int, Entry>()
-    private val failed = LinkedHashMap<Int, String>()
+    private val failed = LinkedHashMap<Int, Tracked>()
 
-    /** Sessions tracked while global mode is on: package and last-seen tick, no handle. */
-    private class Tracked(val pkg: String, var lastSeen: Long)
+    /** Sessions tracked while global mode is on (and failed ones): package and last-seen tick, no handle. */
+    private class Tracked(val pkg: String, var lastSeen: Long, var announced: Boolean)
     private val suppressed = LinkedHashMap<Int, Tracked>()
     private var globalOn = false
     private var tick = 0L
 
-    fun onOpen(session: Int, pkg: String) = guarded("open") {
+    fun onOpen(session: Int, pkg: String, source: SessionSource = SessionSource.ANNOUNCED) = guarded("open") {
+        val announced = source == SessionSource.ANNOUNCED
         if (globalOn) {
             val t = suppressed[session]
             if (t != null) {
                 t.lastSeen = ++tick
+                if (announced) t.announced = true
             } else {
                 while (suppressed.size >= maxSessions) {
                     val victim = suppressed.entries.minByOrNull { it.value.lastSeen } ?: break
                     suppressed.remove(victim.key)
                 }
-                suppressed[session] = Tracked(pkg, ++tick)
+                suppressed[session] = Tracked(pkg, ++tick, announced)
             }
             return@guarded
         }
         val known = sessions[session]
         if (known != null) {
             known.lastSeen = ++tick
+            if (announced) known.announced = true
             return@guarded
         }
         failed.remove(session)
         evictIfFull()
         try {
             val p = params()
-            sessions[session] = build(session, pkg, p, ++tick)
+            sessions[session] = build(session, pkg, p, ++tick, announced)
             Log.i(TAG, "attached session=$session pkg=$pkg")
         } catch (t: Throwable) {
             Log.w(TAG, "attach failed session=$session: ${t.javaClass.name}: ${t.message}")
-            recordFailure(session, pkg)
+            recordFailure(session, pkg, announced)
         }
     }
 
-    fun onClose(session: Int) = guarded("close") {
+    /** A TRACKED close never removes a session the app announced. */
+    fun onClose(session: Int, source: SessionSource = SessionSource.ANNOUNCED) = guarded("close") {
+        val trackerOnly = source == SessionSource.TRACKED
+        if (trackerOnly && failed[session]?.announced == true) return@guarded
         failed.remove(session)
         if (globalOn) {
+            if (trackerOnly && suppressed[session]?.announced == true) return@guarded
             suppressed.remove(session)
             return@guarded
         }
+        if (trackerOnly && sessions[session]?.announced == true) return@guarded
         val e = sessions.remove(session) ?: return@guarded
         releaseQuietly(session, e.handle)
         Log.i(TAG, "released session=$session")
@@ -119,15 +132,15 @@ class EffectManager(
 
     private fun enableGlobal() {
         for ((id, e) in sessions.entries.toList()) {
-            suppressed[id] = Tracked(e.pkg, e.lastSeen)
+            suppressed[id] = Tracked(e.pkg, e.lastSeen, e.announced)
             releaseQuietly(id, e.handle)
         }
         sessions.clear()
-        for ((id, pkg) in failed) suppressed.getOrPut(id) { Tracked(pkg, ++tick) }
+        for ((id, f) in failed) suppressed.getOrPut(id) { Tracked(f.pkg, ++tick, f.announced) }
         failed.clear()
         try {
             val p = params()
-            val g = build(GLOBAL_ID, GLOBAL_PKG, p, ++tick)
+            val g = build(GLOBAL_ID, GLOBAL_PKG, p, ++tick, true)
             if (g.state != SessionState.OK) {
                 releaseQuietly(GLOBAL_ID, g.handle)
                 throw IllegalStateException("no control of the output mix")
@@ -172,10 +185,10 @@ class EffectManager(
         val p = try { params() } catch (t: Throwable) { null }
         for ((id, t) in tracked) {
             try {
-                sessions[id] = build(id, t.pkg, p ?: params(), t.lastSeen)
+                sessions[id] = build(id, t.pkg, p ?: params(), t.lastSeen, t.announced)
             } catch (x: Throwable) {
                 Log.w(TAG, "restore failed session=$id: ${x.javaClass.name}: ${x.message}")
-                recordFailure(id, t.pkg)
+                recordFailure(id, t.pkg, t.announced)
             }
         }
     }
@@ -195,10 +208,10 @@ class EffectManager(
 
     fun sessionInfos(): List<SessionInfo> =
         if (globalOn) {
-            suppressed.map { (id, t) -> SessionInfo(id, t.pkg, SessionState.SUPPRESSED) }
+            suppressed.map { (id, t) -> SessionInfo(id, t.pkg, SessionState.SUPPRESSED, !t.announced) }
         } else {
-            sessions.map { (id, e) -> SessionInfo(id, e.pkg, e.state) } +
-                failed.map { (id, pkg) -> SessionInfo(id, pkg, SessionState.FAILED) }
+            sessions.map { (id, e) -> SessionInfo(id, e.pkg, e.state, !e.announced) } +
+                failed.map { (id, f) -> SessionInfo(id, f.pkg, SessionState.FAILED, !f.announced) }
         }
 
     private fun applyOne(id: Int, e: Entry, p: EngineParams) {
@@ -260,21 +273,21 @@ class EffectManager(
     private fun recreate(id: Int, e: Entry, p: EngineParams) {
         releaseQuietly(id, e.handle)
         try {
-            sessions[id] = build(id, e.pkg, p, e.lastSeen)
+            sessions[id] = build(id, e.pkg, p, e.lastSeen, e.announced)
         } catch (t: Throwable) {
             Log.w(TAG, "recreate failed session=$id: ${t.javaClass.name}: ${t.message}")
             sessions.remove(id)
-            recordFailure(id, e.pkg)
+            recordFailure(id, e.pkg, e.announced)
         }
     }
 
     private fun dropToFailed(id: Int, e: Entry) {
         if (sessions[id] === e) releaseQuietly(id, e.handle)
         sessions.remove(id)
-        recordFailure(id, e.pkg)
+        recordFailure(id, e.pkg, e.announced)
     }
 
-    private fun build(id: Int, pkg: String, p: EngineParams, lastSeen: Long): Entry {
+    private fun build(id: Int, pkg: String, p: EngineParams, lastSeen: Long, announced: Boolean): Entry {
         val h = retrying(
             CREATE_ATTEMPTS, CREATE_BACKOFF_MS, sleeper,
             { attempt, t -> Log.i(TAG, "create retry $attempt session=$id: ${t.javaClass.name}: ${t.message}") },
@@ -285,7 +298,7 @@ class EffectManager(
             releaseQuietly(id, h)
             throw t
         }
-        return Entry(h, pkg, lastSeen, p, state)
+        return Entry(h, pkg, lastSeen, p, state, announced)
     }
 
     private fun evictIfFull() {
@@ -297,9 +310,9 @@ class EffectManager(
         }
     }
 
-    private fun recordFailure(id: Int, pkg: String) {
+    private fun recordFailure(id: Int, pkg: String, announced: Boolean) {
         failed.remove(id)
-        failed[id] = pkg
+        failed[id] = Tracked(pkg, 0, announced)
         while (failed.size > maxSessions) failed.remove(failed.keys.first())
     }
 
