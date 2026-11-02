@@ -247,6 +247,20 @@ class StateStoreTest {
     }
 
     @Test
+    fun opening_the_same_repaired_file_again_keeps_one_copy_and_older_backups() {
+        val store = StateStore(dir)
+        for (millis in listOf(1_000L, 2_000L)) File(dir, "eq-state.json.v2-$millis.bak").writeText("old $millis")
+        writeStateWithOneBadBand(store)
+        repeat(4) {
+            val (_, notice) = store.open()
+            assertEquals(StoreNotice.Repaired(1u, true), notice)
+        }
+        assertEquals(3, baks().size)
+        assertEquals(1, baks().count { it.name.startsWith("eq-state.json.repaired-") })
+        assertTrue("older backups survive", baks().count { it.name.contains(".v2-") } == 2)
+    }
+
+    @Test
     fun a_file_that_is_not_an_object_or_has_no_version_is_still_set_aside_whole() {
         for (text in listOf("[]", "42", "{}", "{\"mode\":\"Graphic\"}", "{\"version\":0}", "{\"version\":\"1\"}")) {
             dir.listFiles()?.forEach { it.deleteRecursively() }

@@ -92,6 +92,9 @@ class StateStore(
 
     /** Copies [f] aside and leaves it in place. Returns whether the copy exists; a failure is logged. */
     private fun backupCopy(f: File, tag: String): Boolean {
+        // A repaired file stays on disk until the first save, so each launch before then sees the same bytes.
+        // Keep one copy of them: more would push older, different backups out of the newest-three limit.
+        if (alreadyCopied(f, tag)) return true
         val target = nextTarget(tag)
         val copied = try {
             copier(f, target)
@@ -103,6 +106,13 @@ class StateStore(
         }
         prune()
         return copied
+    }
+
+    private fun alreadyCopied(f: File, tag: String): Boolean = try {
+        val bytes = f.readBytes()
+        backups().any { it.name.startsWith("$FILE_NAME.$tag-") && it.isFile && it.readBytes().contentEquals(bytes) }
+    } catch (t: Throwable) {
+        false
     }
 
     private fun nextTarget(tag: String): File {
