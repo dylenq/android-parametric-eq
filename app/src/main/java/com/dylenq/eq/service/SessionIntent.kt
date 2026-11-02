@@ -5,7 +5,7 @@ import android.media.audiofx.AudioEffect
 
 /** Pure parser for OPEN/CLOSE session broadcasts. Extras come from untrusted apps. */
 object SessionIntent {
-    private val PKG = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
+    internal val PKG = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
 
     sealed interface Event {
         val session: Int
