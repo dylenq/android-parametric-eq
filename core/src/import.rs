@@ -1,10 +1,14 @@
 // Origin: macOS EQ app src/import.rs, commit 03be7aa, GPL-3.0.
-// Ported for Android; only `crate::state` -> `crate::model` and pub(crate) visibility changed.
+// Ported for Android; `crate::state` -> `crate::model`, and files arrive as text, not paths.
 
 use crate::api::ImportKind;
 use crate::error::EqError;
 use crate::graphic;
-use crate::model::{Band, Curve, FilterKind, GRAPHIC_MAX_DB, MAX_BANDS, MAX_GAIN_DB};
+use crate::model::{Band, Curve, FilterKind, GRAPHIC_COUNTS, GRAPHIC_MAX_DB, MAX_BANDS, MAX_GAIN_DB};
+use crate::presets;
+
+/// Anything bigger is not an EQ file; the app checks this too before the text gets here.
+pub(crate) const MAX_TEXT_BYTES: usize = 1_000_000;
 
 /// A curve read from an Equalizer APO configuration, the format AutoEq publishes its
 /// headphone corrections in (`ParametricEQ.txt`).
@@ -46,13 +50,19 @@ fn filter(tokens: &[&str]) -> Option<Band> {
     Some(band)
 }
 
-pub(crate) fn parse(text: &str) -> Result<Imported, String> {
+fn preamp_of(tokens: &[&str]) -> Option<f32> {
+    let db: f32 = tokens.first()?.parse().ok()?;
+    db.is_finite().then(|| db.clamp(-MAX_GAIN_DB, MAX_GAIN_DB))
+}
+
+/// A parametric file needs at least one filter line, usable or not, and one it can use.
+pub(crate) fn parse(text: &str) -> Result<Imported, EqError> {
     let mut curve = Curve {
         bands: Vec::new(),
         preamp_db: 0.0,
     };
     let mut skipped = 0;
-    let mut recognized = false;
+    let mut filters = 0;
     for line in text.lines() {
         let Some((head, rest)) = line.split_once(':') else {
             continue;
@@ -60,22 +70,21 @@ pub(crate) fn parse(text: &str) -> Result<Imported, String> {
         let head = head.trim().to_ascii_lowercase();
         let tokens: Vec<&str> = rest.split_whitespace().collect();
         if head == "preamp" {
-            if let Some(db) = tokens.first().and_then(|t| t.parse::<f32>().ok()) {
-                curve.preamp_db = db.clamp(-MAX_GAIN_DB, MAX_GAIN_DB);
-                recognized = true;
+            if let Some(db) = preamp_of(&tokens) {
+                curve.preamp_db = db;
             }
         } else if head.starts_with("filter") {
+            filters += 1;
             match filter(&tokens) {
                 Some(band) if curve.bands.len() < MAX_BANDS => curve.bands.push(band),
                 _ => skipped += 1,
             }
-            recognized = true;
         }
     }
-    if recognized {
+    if filters > 0 && !curve.bands.is_empty() {
         Ok(Imported { curve, skipped })
     } else {
-        Err("No Equalizer APO filters found in that file".into())
+        Err(EqError::NotAnEqFile)
     }
 }
 
@@ -92,12 +101,167 @@ pub(crate) struct Parsed {
     pub clamped: usize,
 }
 
-pub(crate) fn parse_any(_text: &str, _graphic_band_count: u32) -> Result<Parsed, EqError> {
-    todo!()
+/// The points of a `GraphicEQ: 20 -5.2; 21 -5.1; ...` line, sorted by frequency, with the
+/// number of entries that could not be used.
+fn graphic_points(line: &str) -> (Vec<(f64, f64)>, usize) {
+    let mut points = Vec::new();
+    let mut skipped = 0;
+    for pair in line.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        let mut parts = pair.split_whitespace();
+        let point = match (parts.next(), parts.next(), parts.next()) {
+            (Some(f), Some(g), None) => f.parse::<f64>().ok().zip(g.parse::<f64>().ok()),
+            _ => None,
+        };
+        match point {
+            Some((f, g)) if f.is_finite() && g.is_finite() && f > 0.0 => points.push((f, g)),
+            _ => skipped += 1,
+        }
+    }
+    points.sort_by(|a, b| a.0.total_cmp(&b.0));
+    (points, skipped)
 }
 
-pub(crate) fn preset_name(_file_name: &str, _taken: &[String]) -> String {
-    todo!()
+/// The curve at `hz`: linear in log frequency between points, the end values held beyond them.
+fn level_at(points: &[(f64, f64)], hz: f64) -> f64 {
+    let at = points.partition_point(|p| p.0 <= hz);
+    if at == 0 {
+        return points[0].1;
+    }
+    if at == points.len() {
+        return points[at - 1].1;
+    }
+    let ((f0, g0), (f1, g1)) = (points[at - 1], points[at]);
+    g0 + (g1 - g0) * (hz.ln() - f0.ln()) / (f1.ln() - f0.ln())
+}
+
+/// Samples per band when averaging. Enough that a 1/3-octave spike in the 31-band layout, whose
+/// bands are a third of an octave wide, is seen across at least a dozen of them.
+const SAMPLES_PER_BAND: usize = 96;
+
+/// Mean of the curve over each band's width in log frequency. A band reaches from the geometric
+/// midpoint to its lower neighbour to the one to its upper neighbour; the end bands are as wide
+/// on the outside as on the inside.
+fn resample(points: &[(f64, f64)], centres: &[f32]) -> Vec<f64> {
+    let c: Vec<f64> = centres.iter().map(|&c| f64::from(c).ln()).collect();
+    (0..c.len())
+        .map(|i| {
+            let below = if i > 0 { (c[i - 1] + c[i]) / 2.0 } else { c[i] - (c[1] - c[0]) / 2.0 };
+            let above = if i + 1 < c.len() {
+                (c[i] + c[i + 1]) / 2.0
+            } else {
+                c[i] + (c[i] - c[i - 1]) / 2.0
+            };
+            let sum: f64 = (0..SAMPLES_PER_BAND)
+                .map(|k| {
+                    let x = below + (above - below) * (k as f64 + 0.5) / SAMPLES_PER_BAND as f64;
+                    level_at(points, x.exp())
+                })
+                .sum();
+            sum / SAMPLES_PER_BAND as f64
+        })
+        .collect()
+}
+
+fn parse_graphic(text: &str, line: &str, count: u32) -> Result<Parsed, EqError> {
+    let centres = graphic::centres(count).ok_or(EqError::InvalidValue)?;
+    let (points, skipped) = graphic_points(line);
+    if points.is_empty() {
+        return Err(EqError::NotAnEqFile);
+    }
+    let mut clamped = 0;
+    let graphic_gains = resample(&points, centres)
+        .into_iter()
+        .map(|g| {
+            let g = g as f32;
+            if g.abs() > GRAPHIC_MAX_DB {
+                clamped += 1;
+            }
+            g.clamp(-GRAPHIC_MAX_DB, GRAPHIC_MAX_DB)
+        })
+        .collect();
+    let preamp_db = text
+        .lines()
+        .filter_map(|l| l.split_once(':'))
+        .filter(|(head, _)| head.trim().eq_ignore_ascii_case("preamp"))
+        .find_map(|(_, rest)| preamp_of(&rest.split_whitespace().collect::<Vec<_>>()))
+        .unwrap_or(0.0);
+    Ok(Parsed {
+        kind: ImportKind::Graphic,
+        bands: Vec::new(),
+        graphic_gains,
+        preamp_db,
+        skipped,
+        clamped,
+    })
+}
+
+/// Reads either AutoEq format: a `GraphicEQ:` line means graphic, anything else parametric.
+/// Graphic curves are resampled onto `graphic_band_count` bands.
+pub(crate) fn parse_any(text: &str, graphic_band_count: u32) -> Result<Parsed, EqError> {
+    if text.len() > MAX_TEXT_BYTES {
+        return Err(EqError::FileTooLarge);
+    }
+    if !GRAPHIC_COUNTS.contains(&graphic_band_count) {
+        return Err(EqError::InvalidValue);
+    }
+    if text.contains('\0') {
+        return Err(EqError::NotAnEqFile);
+    }
+    let text = text.trim_start_matches('\u{feff}');
+    let graphic_line = text.lines().find_map(|l| {
+        let (head, rest) = l.split_once(':')?;
+        head.trim().eq_ignore_ascii_case("graphiceq").then_some(rest)
+    });
+    if let Some(line) = graphic_line {
+        return parse_graphic(text, line, graphic_band_count);
+    }
+    let Imported { curve, skipped } = parse(text)?;
+    Ok(Parsed {
+        kind: ImportKind::Parametric,
+        bands: curve.bands,
+        graphic_gains: Vec::new(),
+        preamp_db: curve.preamp_db,
+        skipped,
+        clamped: 0,
+    })
+}
+
+/// The preset name for a file: no extension, no trailing `ParametricEQ` or `GraphicEQ`, at most
+/// 40 characters, and not one already `taken` (or a built-in), compared the way presets are.
+pub(crate) fn preset_name(file_name: &str, taken: &[String]) -> String {
+    let stem = match file_name.rsplit_once('.') {
+        Some((stem, ext)) if !ext.contains(char::is_whitespace) => stem,
+        _ => file_name,
+    };
+    let stem: String = stem.chars().filter(|c| !c.is_control()).collect();
+    let stem = stem.trim();
+    let lower = stem.to_ascii_lowercase();
+    let stem = ["parametriceq", "graphiceq"]
+        .iter()
+        .find(|suffix| lower.ends_with(**suffix))
+        .map_or(stem, |suffix| &stem[..stem.len() - suffix.len()])
+        .trim();
+    let base = if stem.is_empty() { "Imported" } else { stem };
+    let fit = |text: &str, room: usize| -> String {
+        text.chars().take(room).collect::<String>().trim_end().to_string()
+    };
+    let used = |name: &str| {
+        let norm = presets::normalize(name);
+        taken.iter().any(|t| presets::normalize(t) == norm)
+            || presets::builtin_presets().iter().any(|p| presets::normalize(&p.name) == norm)
+    };
+    let first = fit(base, presets::MAX_NAME_CHARS);
+    if !used(&first) {
+        return first;
+    }
+    (2..)
+        .map(|n| {
+            let suffix = format!(" {n}");
+            let room = presets::MAX_NAME_CHARS - suffix.chars().count();
+            format!("{}{suffix}", fit(base, room))
+        })
+        .find(|name| !used(name))
+        .unwrap_or(first)
 }
 
 #[cfg(test)]
@@ -251,7 +415,7 @@ Filter 4: ON HSC Fc 10000 Hz Gain -3.0 dB Q 0.70
             10,
         )
         .unwrap();
-        assert_eq!(g.skipped, 7);
+        assert_eq!(g.skipped, 6);
         // The two usable points are both +2 dB, so the curve is a flat +2 everywhere.
         assert!(g.graphic_gains.iter().all(|v| (v - 2.0).abs() < 1e-4));
     }
