@@ -51,8 +51,11 @@ class UiStateHolder(val runtime: EqRuntime) {
         get() = usableSampleRate(AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC))
     private val curveTick = Channel<Unit>(Channel.CONFLATED)
 
+    // Row ids of the band list (UI side only). Declared before [_ui], whose first state needs them; guarded by [lock].
+    private val bandIdSource = BandIdSource()
+
     private val _ui = MutableStateFlow(
-        fromSnapshot(EqUiState(), controller.snapshot(), runtime.status.value),
+        fromSnapshot(EqUiState(), controller.snapshot(), runtime.status.value).let { it.copy(bandIds = bandIdSource.fresh(it.bands.size)) },
     )
     val ui: StateFlow<EqUiState> = _ui.asStateFlow()
 
@@ -230,6 +233,7 @@ class UiStateHolder(val runtime: EqRuntime) {
         } finally {
             endGesture(Source.ADD)
         }
+        appendBandId()
         republishLocked()
         selectAdded(index)
     }
@@ -382,6 +386,12 @@ class UiStateHolder(val runtime: EqRuntime) {
         if (index >= 0) _ui.update { s -> if (index in s.bands.indices) s.copy(selectedBand = index) else s }
     }
 
+    /** A band was added at the end: give it a new row id and keep the others. Call under [lock]. */
+    private fun appendBandId() {
+        val ids = bandIdSource.appended(_ui.value.bandIds)
+        _ui.update { it.copy(bandIds = ids) }
+    }
+
     private fun writeBand(index: Int, next: Band) {
         edited()
         step { controller.edit { it.setBand(index.toUInt(), next) } }
@@ -406,14 +416,18 @@ class UiStateHolder(val runtime: EqRuntime) {
         if (bandAt(index) == null) return@guarded
         edited()
         step { controller.edit { it.removeBand(index.toUInt()) } }
+        val ids = bandIdSource.removedAt(_ui.value.bandIds, index)
         _ui.update { s ->
             val sel = s.selectedBand
-            s.copy(selectedBand = when {
-                sel == null -> null
-                sel == index -> null
-                sel > index -> sel - 1
-                else -> sel
-            })
+            s.copy(
+                bandIds = ids,
+                selectedBand = when {
+                    sel == null -> null
+                    sel == index -> null
+                    sel > index -> sel - 1
+                    else -> sel
+                },
+            )
         }
         republishLocked()
         emit("Band ${index + 1} deleted", undoable = true)
@@ -447,6 +461,7 @@ class UiStateHolder(val runtime: EqRuntime) {
                 c.setBand(i.toUInt(), Band(FilterKind.PEAK, freq, 0f, 1.0f, true))
             }
         }
+        appendBandId()
         republishLocked()
         selectAdded(index)
     }
@@ -738,10 +753,15 @@ class UiStateHolder(val runtime: EqRuntime) {
         synchronized(lock) { republishLocked() }
     }
 
-    /** Re-reads the core snapshot (callers hold [lock]); status fields come from the runtime. */
+    /**
+     * Re-reads the core snapshot (callers hold [lock]); status fields come from the runtime. The row ids are
+     * settled here, outside the update (which may be retried), and kept unless the id list and the band count
+     * disagree.
+     */
     private fun republishLocked(st: ServiceStatus = runtime.status.value) {
         val snap = controller.snapshot()
-        _ui.update { fromSnapshot(it, snap, st) }
+        val ids = bandIdSource.reconciled(_ui.value.bandIds, snap.bands.size)
+        _ui.update { fromSnapshot(it, snap, st).copy(bandIds = ids) }
         refreshCurve()
     }
 

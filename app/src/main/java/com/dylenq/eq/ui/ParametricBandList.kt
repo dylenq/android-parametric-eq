@@ -85,10 +85,13 @@ fun ParametricBandList(
     pinchHintSeen: Boolean,
     modifier: Modifier = Modifier,
     footer: (@Composable () -> Unit)? = null,
-    fields: @Composable (index: Int, band: Band) -> Unit = { i, b -> BandFieldRow(i, b, state().bands.size, actions) },
+    fields: @Composable (index: Int, band: Band) -> Unit = { i, b -> BandFieldRow(i, b, { state().bands.size }, actions) },
 ) {
     val ui = state()
     val bands = ui.bands
+    // Rows are keyed by band id, so a row keeps its own state when the band at its index changes. A host that
+    // built the state without ids still gets distinct keys (a duplicate key throws).
+    val rowKeys = ui.bandIds.takeIf { it.size == bands.size } ?: List(bands.size) { -(it + 1L) }
     val selected = ui.selectedBand?.takeIf { it in bands.indices }
     val listState = rememberLazyListState()
     val reduced = rememberReducedMotion()
@@ -143,7 +146,7 @@ fun ParametricBandList(
                 )
             }
         }
-        itemsIndexed(bands, key = { i, _ -> "band-$i" }) { i, band ->
+        itemsIndexed(bands, key = { i, _ -> rowKeys[i] }) { i, band ->
             BandRow(
                 index = i,
                 band = band,

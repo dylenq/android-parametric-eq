@@ -45,6 +45,11 @@ data class EqUiState(
     val parametricEnabledCount: Int = 0,
     /** Every parametric band in index order (enabled or not). */
     val bands: List<Band> = emptyList(),
+    /**
+     * One id per band, index-aligned with [bands], used as the band list's row key. UI side only: never
+     * persisted and never sent to the core. A host that builds a state without ids gets index-based keys.
+     */
+    val bandIds: List<Long> = emptyList(),
     /** The selected parametric band, or null; cleared on leaving Parametric, never out of range. */
     val selectedBand: Int? = null,
     /** True while any gesture (graphic slider, preamp or parametric) holds an undo group open. */

@@ -99,8 +99,12 @@ internal class FieldFocusSession(
 internal fun BandFieldRow(
     index: Int,
     band: Band,
-    /** Rows are keyed by position, so a changed band count means this row may now show another band. */
-    bandCount: Int,
+    /**
+     * A changed band count means the band at [index] may be another band. A function, not a value: a row
+     * that leaves because its band was removed never recomposes, and must still see the new count when it
+     * disposes, or its unsaved text would be written to the band that took its index.
+     */
+    bandCount: () -> Int,
     actions: BandListActions,
     modifier: Modifier = Modifier,
 ) {
@@ -201,7 +205,7 @@ private fun NumberField(
     parse: (String) -> FieldParse,
     format: (Float) -> String,
     apply: (Float) -> Unit,
-    bandCount: Int,
+    bandCount: () -> Int,
     message: Pair<BandField, String>?,
     onMessage: (Pair<BandField, String>?) -> Unit,
     modifier: Modifier = Modifier,
@@ -216,17 +220,18 @@ private fun NumberField(
     val modelNow = rememberUpdatedState(modelText)
     val applyNow = rememberUpdatedState(apply)
     val bandCountNow = rememberUpdatedState(bandCount)
+    val count = bandCount()
     // The band count the draft was typed against; a draft never carries over to another band.
-    var draftBandCount by remember { mutableStateOf(bandCount) }
+    var draftBandCount by remember { mutableStateOf(count) }
 
     // Not focused and not mid-edit: show the latest formatted model value (a drag, an undo, a sign flip).
     LaunchedEffect(modelText, focused, dirty) {
         if (!focused && !dirty && value.text != modelText) value = TextFieldValue(modelText)
     }
 
-    LaunchedEffect(bandCount) {
-        if (draftBandCount != bandCount) {
-            draftBandCount = bandCount
+    LaunchedEffect(count) {
+        if (draftBandCount != count) {
+            draftBandCount = count
             dirty = false
             atFocus = modelText
             value = TextFieldValue(modelText)
@@ -235,7 +240,7 @@ private fun NumberField(
 
     /** Pitfall 5: nothing happens when the text is what it was at focus. */
     fun commit() {
-        if (draftBandCount != bandCountNow.value) {
+        if (draftBandCount != bandCountNow.value()) {
             dirty = false
             return
         }
@@ -275,7 +280,7 @@ private fun NumberField(
     val atFocusNow = rememberUpdatedState(atFocus)
     DisposableEffect(Unit) {
         onDispose {
-            if (enabled && draftBandCount == bandCountNow.value && NumericField.shouldCommit(atFocusNow.value, draftNow.value)) {
+            if (enabled && draftBandCount == bandCountNow.value() && NumericField.shouldCommit(atFocusNow.value, draftNow.value)) {
                 when (val r = parse(draftNow.value)) {
                     is FieldParse.Value -> applyNow.value(r.value)
                     is FieldParse.Clamped -> applyNow.value(r.value)
