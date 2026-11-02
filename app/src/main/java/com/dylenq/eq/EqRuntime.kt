@@ -294,7 +294,9 @@ class EqRuntime(
             null
         } catch (t: Throwable) {
             Log.w("EQ-SVC", "set app preset failed: ${t.javaClass.name}: ${t.message}")
-            "That preset no longer exists."
+            val text = "That preset no longer exists."
+            _status.update { it.copy(notice = text) }
+            text
         }
     }
 

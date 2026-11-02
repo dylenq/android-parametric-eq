@@ -23,6 +23,8 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +60,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dylenq.eq.R
+import com.dylenq.eq.core.PresetInfo
+import com.dylenq.eq.service.AppEntry
 import com.dylenq.eq.service.SessionInfo
 import com.dylenq.eq.service.SessionState
 import com.dylenq.eq.service.TrackingState
@@ -77,8 +81,8 @@ const val SESSIONS_EMPTY_BODY = "Play something in another app. Some apps, such 
 
 /**
  * PEQ-07: the Settings destination. Switches apply immediately; the global-mode notice (a rejection) is shown
- * here, where the switch is. Session package names come from other apps' broadcasts, so they are plain text:
- * no PackageManager label lookup and no click or link.
+ * here, where the switch is. Session and app package names come from other apps' broadcasts, so they are plain
+ * text with no click or link; app labels come from the PackageManager and are plain text too.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -105,8 +109,14 @@ fun SettingsScreen(
             runtime.recheckTracking()
         }
     }
-    val sessions = remember(status.sessions) { SessionCopy.sorted(status.sessions) }
     val context = LocalContext.current
+    val ui by holder.ui.collectAsStateWithLifecycle()
+    val presetNames = remember(ui.presets) { ui.presets.associate { it.key to it.name } }
+    val labels = remember(context) {
+        AppLabels { pkg -> context.packageManager.getApplicationInfo(pkg, 0).loadLabel(context.packageManager).toString() }
+    }
+    val sessions = remember(status.sessions) { SessionCopy.sorted(status.sessions) }
+    val apps = remember(status.apps) { AppsCopy.sorted(status.apps) { labels.label(it) } }
     val engineBandsLine = status.engineMaxBands?.let { "Engine bands: $it (measured)" } ?: "Engine bands: not measured yet"
     val aboutLine = remember {
         val app = try {
@@ -185,6 +195,24 @@ fun SettingsScreen(
                         onShizuku = holder::grantWithShizuku,
                     )
                 }
+                item(key = "h-apps") {
+                    SectionHeader("Apps", count = if (apps.isEmpty()) null else AppsCopy.countText(apps.size), countTag = "apps-count")
+                }
+                item(key = "apps-notes") { AppsNotes(globalOn = status.globalMode) }
+                if (apps.isEmpty()) {
+                    item(key = "apps-empty") { AppsEmptyBlock() }
+                } else {
+                    items(apps, key = { "a-${it.pkg}" }) { app ->
+                        AppRow(
+                            app = app,
+                            title = labels.label(app.pkg),
+                            presets = ui.presets,
+                            presetText = AppsCopy.presetText(app.presetKey, presetNames),
+                            onEnabled = { on -> runtime.setAppEnabled(app.pkg, on) },
+                            onPreset = { key -> runtime.setAppPreset(app.pkg, key) },
+                        )
+                    }
+                }
                 item(key = "h-sessions") {
                     SectionHeader(
                         "Detected audio sessions",
@@ -194,7 +222,10 @@ fun SettingsScreen(
                 if (sessions.isEmpty()) {
                     item(key = "sessions-empty") { SessionsEmptyBlock() }
                 } else {
-                    items(sessions, key = { "s-${it.id}" }) { SessionRow(it) }
+                    items(sessions, key = { "s-${it.id}" }) { info ->
+                        val key = status.apps.firstOrNull { it.pkg == info.pkg }?.presetKey
+                        SessionRow(info, key?.let { presetNames[it] })
+                    }
                 }
                 item(key = "h-about") { SectionHeader("About") }
                 item(key = "engine-bands") { EngineBandsRow(engineBandsLine) }
@@ -288,7 +319,7 @@ private fun NeedsPermissionBlock(packageName: String, onShizuku: suspend () -> S
 }
 
 @Composable
-private fun SectionHeader(title: String, count: String? = null) {
+private fun SectionHeader(title: String, count: String? = null, countTag: String = "sessions-count") {
     Row(
         Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -304,7 +335,7 @@ private fun SectionHeader(title: String, count: String? = null) {
                 count,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.testTag("sessions-count").semantics { liveRegion = LiveRegionMode.Polite },
+                modifier = Modifier.testTag(countTag).semantics { liveRegion = LiveRegionMode.Polite },
             )
         }
     }
@@ -337,7 +368,7 @@ private fun SettingsSwitchRow(tag: String, title: String, supporting: String, ch
 }
 
 @Composable
-private fun SessionRow(info: SessionInfo) {
+private fun SessionRow(info: SessionInfo, presetName: String? = null) {
     val problem = info.state == SessionState.NO_CONTROL || info.state == SessionState.FAILED
     Row(
         Modifier.fillMaxWidth().heightIn(min = 72.dp).padding(horizontal = 16.dp, vertical = 12.dp).testTag("session-row-${info.id}"),
@@ -359,10 +390,98 @@ private fun SessionRow(info: SessionInfo) {
             // Plain text only: the package string is attacker-influenced (other apps' broadcasts).
             Text(SessionCopy.rowTitle(info.pkg), style = MaterialTheme.typography.bodyLarge)
             Text(
-                SessionCopy.supporting(info),
+                SessionCopy.supporting(info, presetName),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (problem) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+@Composable
+private fun AppsNotes(globalOn: Boolean) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("apps-notes")) {
+        Text(AppsCopy.FOLLOW_NOTE, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (globalOn) {
+            Text(
+                AppsCopy.GLOBAL_NOTE,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("apps-global-note"),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppsEmptyBlock() {
+    Column(
+        Modifier.fillMaxWidth().heightIn(min = 96.dp).padding(horizontal = 16.dp, vertical = 12.dp).testTag("apps-empty"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(AppsCopy.EMPTY_TITLE, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+        Text(
+            AppsCopy.EMPTY_BODY,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** App name and package are plain text (other apps' broadcasts), never a link or action. */
+@Composable
+private fun AppRow(
+    app: AppEntry,
+    title: String,
+    presets: List<PresetInfo>,
+    presetText: String,
+    onEnabled: (Boolean) -> Unit,
+    onPreset: (String?) -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("app-row-${app.pkg}")) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(AppsCopy.title(title), style = MaterialTheme.typography.bodyLarge)
+                if (title != app.pkg) {
+                    Text(app.pkg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (app.playingNow) {
+                    Text("Playing now", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .testTag("app-switch-${app.pkg}")
+                    .toggleable(value = app.enabled, role = Role.Switch, onValueChange = onEnabled)
+                    .semantics { stateDescription = if (app.enabled) "On" else "Off" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Switch(checked = app.enabled, onCheckedChange = null)
+            }
+        }
+        Box {
+            OutlinedButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("app-preset-${app.pkg}"),
+            ) { Text(presetText) }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text(AppsCopy.DEFAULT_PRESET) },
+                    onClick = { menuOpen = false; onPreset(null) },
+                    modifier = Modifier.testTag("app-preset-${app.pkg}-live"),
+                )
+                presets.forEach { p ->
+                    DropdownMenuItem(
+                        text = { Text(p.name) },
+                        onClick = { menuOpen = false; onPreset(p.key) },
+                        modifier = Modifier.testTag("app-preset-${app.pkg}-${p.key}"),
+                    )
+                }
+            }
         }
     }
 }
