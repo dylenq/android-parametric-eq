@@ -1,5 +1,10 @@
 package com.dylenq.eq.ui
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,10 +37,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
@@ -47,7 +54,9 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dylenq.eq.R
+import com.dylenq.eq.core.EqMode
 import com.dylenq.eq.core.PresetInfo
+import kotlinx.coroutines.launch
 
 internal const val USER_KEY_PREFIX = "user:"
 
@@ -87,7 +96,7 @@ internal fun PresetSheet(ui: EqUiState, holder: UiStateHolder, spec: WindowSpec,
                         modifier = Modifier.semantics { heading() },
                     )
                 }
-                HeaderActions(ui, holder, spec.largeFont, onSaveAs = { show(PresetDialog.SaveAs) })
+                HeaderActions(ui, holder, spec.largeFont, onSaveAs = { show(PresetDialog.SaveAs) }, onDismiss = onDismiss)
                 HorizontalDivider(
                     modifier = Modifier.padding(vertical = 8.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
@@ -153,9 +162,29 @@ internal fun PresetSheet(ui: EqUiState, holder: UiStateHolder, spec: WindowSpec,
 
 private enum class PresetDialog { None, SaveAs, Rename, Delete }
 
-/** Save (overwrite the active user preset) and Save as new...; stacked at font scale 1.3 and up. */
+/**
+ * Save (overwrite the active user preset) and Save as new..., then Import and Export; each pair is stacked at
+ * font scale 1.3 and up. The pickers are the system document pickers, so no storage permission is needed.
+ */
 @Composable
-private fun HeaderActions(ui: EqUiState, holder: UiStateHolder, stacked: Boolean, onSaveAs: () -> Unit) {
+private fun HeaderActions(ui: EqUiState, holder: UiStateHolder, stacked: Boolean, onSaveAs: () -> Unit, onDismiss: () -> Unit) {
+    val resolver = LocalContext.current.contentResolver
+    val scope = rememberCoroutineScope()
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val uri = r.data?.data
+        if (r.resultCode == Activity.RESULT_OK && uri != null) {
+            // On a rejected file the holder has already shown the message and nothing changed.
+            scope.launch { if (holder.importEqUri(resolver, uri) == PresetResult.Ok) onDismiss() }
+        }
+    }
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val uri = r.data?.data
+        if (r.resultCode == Activity.RESULT_OK && uri != null) scope.launch { holder.exportEqUri(resolver, uri) }
+    }
+    fun launch(l: (Intent) -> Unit, intent: Intent) {
+        try { l(intent) } catch (_: ActivityNotFoundException) { holder.showMessage(ImportExportCopy.NO_PICKER) }
+    }
+    val canExport = ui.mode == EqMode.PARAMETRIC
     val activeIsUser = ui.activePresetKey?.startsWith(USER_KEY_PREFIX) == true
     val canSave = activeIsUser && ui.presetModified
     val saveDisabledState = if (activeIsUser) "Save, no changes to save" else "Save, choose Save as new to name this sound"
@@ -172,17 +201,46 @@ private fun HeaderActions(ui: EqUiState, holder: UiStateHolder, stacked: Boolean
             Text("Save as new\u2026")
         }
     }
+    val import: @Composable (Modifier) -> Unit = { m ->
+        OutlinedButton(
+            onClick = { launch(importLauncher::launch, ImportExportCopy.openDocumentIntent()) },
+            modifier = m.heightIn(min = 48.dp).testTag("preset-import"),
+        ) { Text("Import\u2026") }
+    }
+    val export: @Composable (Modifier) -> Unit = { m ->
+        OutlinedButton(
+            onClick = { launch(exportLauncher::launch, ImportExportCopy.createDocumentIntent(ui.activePresetName)) },
+            enabled = canExport,
+            modifier = m.heightIn(min = 48.dp).testTag("preset-export")
+                .semantics { if (!canExport) stateDescription = ImportExportCopy.EXPORT_DISABLED },
+        ) { Text("Export\u2026") }
+    }
+    val pad = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
     if (stacked) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(pad, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             save(Modifier.fillMaxWidth())
             saveAs(Modifier.fillMaxWidth())
+            import(Modifier.fillMaxWidth())
+            export(Modifier.fillMaxWidth())
         }
     } else {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            save(Modifier.weight(1f))
-            saveAs(Modifier.weight(1f))
+        Column(pad, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                save(Modifier.weight(1f))
+                saveAs(Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                import(Modifier.weight(1f))
+                export(Modifier.weight(1f))
+            }
         }
     }
+    Text(
+        if (canExport) ImportExportCopy.EXPORT_NOTE else ImportExportCopy.EXPORT_DISABLED,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
+    )
 }
 
 @Composable

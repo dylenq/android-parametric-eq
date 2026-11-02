@@ -1,5 +1,6 @@
 package com.dylenq.eq.ui
 
+import android.content.Intent
 import com.dylenq.eq.core.EqException
 import com.dylenq.eq.core.ImportKind
 import com.dylenq.eq.core.ImportReport
@@ -12,6 +13,22 @@ internal object ImportExportCopy {
     const val EXPORT_NOTE = "Tone and balance are not saved in this file."
     const val EXPORT_DISABLED = "Export needs the parametric EQ: the file holds parametric filters."
     const val EXPORT_FAILED = "Couldn't save the file."
+    const val NO_PICKER = "No file picker is available on this device."
+
+    /** The system document picker for an EQ file. Documents the user picks need no storage permission. */
+    fun openDocumentIntent(): Intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        type = "text/*"
+        // Some providers label plain text files as octet-stream.
+        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/octet-stream"))
+    }
+
+    /** The system "save as" picker, proposing "<preset or EQ> ParametricEQ.txt". */
+    fun createDocumentIntent(presetName: String?): Intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TITLE, "${presetName ?: "EQ"} ParametricEQ.txt")
+    }
 
     /** "Imported HD650, 5 filters, 2 skipped, 1 clamped": skipped and clamped appear only when not zero. */
     fun importedMessage(name: String, filters: Int, skipped: Int, clamped: Int, noun: String = "filter"): String = buildString {

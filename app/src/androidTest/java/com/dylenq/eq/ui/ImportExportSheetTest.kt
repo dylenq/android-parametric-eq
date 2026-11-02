@@ -99,11 +99,13 @@ class ImportExportSheetTest {
         val spec = WindowSpec(360, 740, 1.5f)
         hostSheet(spec)
         val d = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        // The sheet is its own window, so it spans the device, not the hosted box.
+        val screenPx = InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.widthPixels
         val imp = compose.onNodeWithTag("preset-import").assertIsDisplayed().fetchSemanticsNode()
         val exp = compose.onNodeWithTag("preset-export").assertIsDisplayed().fetchSemanticsNode()
         assertTrue("stacked: export below import", exp.positionInRoot.y >= imp.positionInRoot.y + imp.size.height - 1)
         for (n in listOf(imp, exp)) {
-            assertTrue(n.positionInRoot.x >= 0f && (n.positionInRoot.x + n.size.width) / d <= spec.widthDp + 0.5f)
+            assertTrue(n.positionInRoot.x >= 0f && n.positionInRoot.x + n.size.width <= screenPx + 1f)
             assertTrue(n.size.height / d >= 47.5f)
         }
     }

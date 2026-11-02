@@ -96,6 +96,9 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
         _editSerial.update { it + 1 }
     }
 
+    /** Shows [text] in the snackbar; for messages that come from the UI layer, such as a missing file picker. */
+    fun showMessage(text: String) = synchronized(lock) { emit(text) }
+
     /** Emits [text], stamping the current edit serial on it. Call under [lock], after [edited] for undoable ones. */
     private fun emit(text: String, undoable: Boolean = false) {
         val m = UiMessage(text, undoable)
