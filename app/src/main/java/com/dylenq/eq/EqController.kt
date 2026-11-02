@@ -5,6 +5,7 @@ import com.dylenq.eq.core.EngineParams
 import com.dylenq.eq.core.EqCore
 import com.dylenq.eq.core.AppRuleInfo
 import com.dylenq.eq.core.DeviceRuleInfo
+import com.dylenq.eq.core.ImportReport
 import com.dylenq.eq.core.Snapshot
 
 /**
@@ -67,6 +68,16 @@ class EqController internal constructor(
     fun renamePreset(key: String, newName: String): String = presetEdit { it.renamePreset(key, newName) }
 
     fun deletePreset(key: String) = presetEdit { it.deletePreset(key) }
+
+    /**
+     * Stores the text of an AutoEq file as a new user preset and returns what it made; it does not apply it.
+     * [graphicBandCount] is the layout a GraphicEQ file is resampled to.
+     */
+    fun importEqText(fileName: String, text: String, graphicBandCount: UInt): ImportReport =
+        presetEdit { it.importEqText(fileName, text, graphicBandCount) }
+
+    /** Read-only: the live bands as ParametricEQ.txt text; never marks dirty. */
+    fun exportParametricText(): String = core.exportParametricText()
 
     private fun <T> presetEdit(block: (EqCore) -> T): T = edit {
         try {
