@@ -62,7 +62,7 @@ class RealShizukuGateway(private val context: Context) : ShizukuGateway {
             val service = withTimeoutOrNull(10_000) { bound.await() }
                 ?: return GrantResult.Failed("Shizuku did not start the helper in time")
             try {
-                val result = GrantCommand.decode(service.grantDump(context.packageName))
+                val result = GrantCommand.decode(service.grantDump(context.packageName, GrantCommand.userOf(android.os.Process.myUid())))
                 runCatching { service.destroy() }
                 result
             } catch (e: Exception) {

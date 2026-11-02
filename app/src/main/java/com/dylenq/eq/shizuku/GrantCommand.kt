@@ -13,10 +13,13 @@ object GrantCommand {
 
     private val PACKAGE = Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")
 
-    /** The argv for [pkg] on user 0, or null when [pkg] is not [ownId] or is not a plain package name. */
-    fun argv(pkg: String, ownId: String = APP_ID): List<String>? {
-        if (pkg.isEmpty() || pkg.length > 255 || !PACKAGE.matches(pkg) || pkg != ownId) return null
-        return listOf("/system/bin/cmd", "package", "grant", "--user", "0", pkg, PERMISSION)
+    /** The Android user a uid belongs to. The helper runs as the shell, so the app passes its own. */
+    fun userOf(uid: Int): Int = uid / 100000
+
+    /** The argv for [pkg] on [user], or null when [pkg] is not [ownId], is not a plain package name, or [user] is negative. */
+    fun argv(pkg: String, ownId: String = APP_ID, user: Int = 0): List<String>? {
+        if (pkg.isEmpty() || pkg.length > 255 || !PACKAGE.matches(pkg) || pkg != ownId || user < 0) return null
+        return listOf("/system/bin/cmd", "package", "grant", "--user", user.toString(), pkg, PERMISSION)
     }
 
     /** Service reply: exit code on the first line, output after it. */

@@ -32,6 +32,14 @@ class GrantCommandTest {
         assertNull(GrantCommand.argv("com.dylenq.eq", ownId = "com.other.app"))
     }
 
+    @Test fun grantTargetsTheUserTheAppRunsIn() {
+        val argv = GrantCommand.argv("com.dylenq.eq", user = 10)!!
+        assertEquals("10", argv[argv.indexOf("--user") + 1])
+        assertNull(GrantCommand.argv("com.dylenq.eq", user = -1))
+        assertEquals(10, GrantCommand.userOf(1010250))
+        assertEquals(0, GrantCommand.userOf(10250))
+    }
+
     @Test fun replyDecoding() {
         assertEquals(GrantResult.Granted, GrantCommand.decode(GrantCommand.encode(0, "")))
         assertEquals(GrantResult.Failed("Unknown permission"), GrantCommand.decode(GrantCommand.encode(1, " Unknown permission\n")))

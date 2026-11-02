@@ -10,8 +10,8 @@ import kotlin.system.exitProcess
 class GrantService(context: Context) : IGrantService.Stub() {
     private val ownId = context.packageName
 
-    override fun grantDump(pkg: String?): String {
-        val argv = GrantCommand.argv(pkg ?: "", ownId)
+    override fun grantDump(pkg: String?, user: Int): String {
+        val argv = GrantCommand.argv(pkg ?: "", ownId, user)
             ?: return GrantCommand.encode(1, "refused: not this app's package")
         return try {
             val p = ProcessBuilder(argv).redirectErrorStream(true).start()
