@@ -440,6 +440,28 @@ impl Inner {
         })
     }
 
+    /// What the engine would get if `key` were applied for real, without touching this state:
+    /// the preset's curve on a temporary `Inner`, with the live limiter flag, bypass and band cap.
+    pub fn engine_params_for_preset(
+        &self,
+        key: &str,
+        sample_rate: u32,
+        frame_ms: f32,
+    ) -> Result<Engine, EqError> {
+        let mut preset = self.find_preset(key).ok_or(EqError::NotFound)?;
+        if !preset.curve.sanitize() {
+            return Err(EqError::InvalidValue);
+        }
+        let mut temp = Inner {
+            limiter_enabled: self.limiter_enabled,
+            bypass: self.bypass,
+            engine_band_cap: self.engine_band_cap,
+            ..Inner::default()
+        };
+        temp.apply_curve(&preset.curve);
+        temp.engine_params(sample_rate, frame_ms)
+    }
+
     // ---- presets ----
 
     /// Resolves a key against the built-ins and the user presets.

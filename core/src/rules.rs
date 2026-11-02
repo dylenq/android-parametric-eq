@@ -120,10 +120,8 @@ impl Inner {
     /// Assigns a preset to an app, or `None` for the live EQ. A key that does not resolve is
     /// `NotFound` and changes nothing.
     pub fn set_app_preset(&mut self, pkg: &str, key: Option<&str>) -> Result<(), EqError> {
-        if let Some(k) = key {
-            if self.find_preset(k).is_none() {
-                return Err(EqError::NotFound);
-            }
+        if key.is_some_and(|k| self.find_preset(k).is_none()) {
+            return Err(EqError::NotFound);
         }
         if let Some(r) = self.rule_mut(pkg) {
             r.preset_key = key.map(str::to_string);
@@ -332,5 +330,90 @@ mod tests {
         let stale = rule(&l, "stale").unwrap();
         assert!(!stale.enabled && stale.preset_key.is_none());
         assert_eq!(rule(&l, "built").unwrap().preset_key.as_deref(), Some("builtin:Bass"));
+    }
+
+    #[test]
+    fn rename_keeps_assignments() {
+        let mut s = Inner::default();
+        s.save_preset("Mine").unwrap();
+        s.set_app_preset("a.one", Some("user:Mine")).unwrap();
+        s.set_app_preset("a.two", Some("builtin:Bass")).unwrap();
+        let undo = s.can_undo();
+        let k = s.rename_preset("user:Mine", "Yours").unwrap();
+        assert_eq!(k, "user:Yours");
+        assert_eq!(rule(&s, "a.one").unwrap().preset_key.as_deref(), Some("user:Yours"));
+        assert_eq!(rule(&s, "a.two").unwrap().preset_key.as_deref(), Some("builtin:Bass"));
+        assert_eq!(s.can_undo(), undo);
+    }
+
+    #[test]
+    fn delete_returns_apps_to_the_live_eq() {
+        let mut s = Inner::default();
+        s.save_preset("Mine").unwrap();
+        s.set_app_preset("a.one", Some("user:Mine")).unwrap();
+        s.set_app_enabled("a.one", false);
+        s.delete_preset("user:Mine").unwrap();
+        let r = rule(&s, "a.one").unwrap();
+        assert!(r.preset_key.is_none());
+        assert!(!r.enabled);
+    }
+
+    #[test]
+    fn a_failed_rename_leaves_rules_alone() {
+        let mut s = Inner::default();
+        s.save_preset("Mine").unwrap();
+        s.save_preset("Other").unwrap();
+        s.set_app_preset("a.one", Some("user:Mine")).unwrap();
+        assert_eq!(s.rename_preset("user:Mine", "Other"), Err(EqError::NameTaken));
+        assert_eq!(s.delete_preset("builtin:Bass"), Err(EqError::ReadOnly));
+        assert_eq!(rule(&s, "a.one").unwrap().preset_key.as_deref(), Some("user:Mine"));
+    }
+
+    #[test]
+    fn preset_params_match_a_real_apply() {
+        let mut s = Inner::default();
+        s.set_band(0, crate::model::Band { gain_db: 7.0, ..s.parametric[0] }).unwrap();
+        s.set_balance(0.4).unwrap();
+        s.save_preset("Mine").unwrap();
+        s.reset_bands();
+        s.set_balance(0.0).unwrap();
+        s.limiter_enabled = false;
+        s.bypass = true;
+        s.engine_band_cap = Some(12);
+        for key in ["user:Mine", "builtin:Bass", "builtin:Vocal", "builtin:Flat"] {
+            let got = s.engine_params_for_preset(key, 48_000, 85.3).unwrap();
+            let mut real = Inner {
+                presets: s.presets.clone(),
+                limiter_enabled: s.limiter_enabled,
+                bypass: s.bypass,
+                engine_band_cap: s.engine_band_cap,
+                ..Inner::default()
+            };
+            real.apply_preset(key).unwrap();
+            let want = real.engine_params(48_000, 85.3).unwrap();
+            assert_eq!(got.gains_db, want.gains_db, "{key}");
+            assert_eq!(got.cutoffs_hz, want.cutoffs_hz, "{key}");
+            assert_eq!(got.input_gain_db, want.input_gain_db, "{key}");
+            assert_eq!(got.input_gain_left_db, want.input_gain_left_db, "{key}");
+            assert_eq!(got.input_gain_right_db, want.input_gain_right_db, "{key}");
+            assert_eq!(got.layout_id, want.layout_id, "{key}");
+            assert!(!got.limiter_enabled && got.bypass);
+        }
+    }
+
+    #[test]
+    fn preset_params_leave_live_state_alone() {
+        let mut s = Inner::default();
+        s.apply_preset("builtin:Treble").unwrap();
+        s.set_preamp(-3.0).unwrap();
+        let before = (s.edit_snapshot(), s.active_preset.clone(), s.can_undo(), s.can_redo());
+        let live = s.engine_params(48_000, 85.3).unwrap().gains_db;
+        s.engine_params_for_preset("builtin:Bass", 48_000, 85.3).unwrap();
+        assert_eq!(before, (s.edit_snapshot(), s.active_preset.clone(), s.can_undo(), s.can_redo()));
+        assert_eq!(live, s.engine_params(48_000, 85.3).unwrap().gains_db);
+        assert!(matches!(
+            s.engine_params_for_preset("user:Nope", 48_000, 85.3),
+            Err(EqError::NotFound)
+        ));
     }
 }

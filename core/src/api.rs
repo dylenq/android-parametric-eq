@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::EqError;
 use crate::headroom::LimiterParams;
-use crate::inner::{DEFAULT_FRAME_MS, Inner};
+use crate::inner::{DEFAULT_FRAME_MS, Engine, Inner};
 use crate::model::{Band, EqMode};
 use crate::persist;
 use crate::presets;
@@ -39,6 +39,15 @@ pub struct PresetInfo {
     pub key: String,
     pub name: String,
     pub builtin: bool,
+}
+
+/// One per-app rule. `preset_key` of `None` means the live EQ.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct AppRuleInfo {
+    pub pkg: String,
+    pub enabled: bool,
+    pub preset_key: Option<String>,
+    pub last_seen: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -223,6 +232,33 @@ impl EqCore {
         self.lock().delete_preset(&key)
     }
 
+    /// Records that an app has a session. True when a rule was added. Not an undo step.
+    pub fn note_app(&self, pkg: String) -> bool {
+        self.lock().note_app(&pkg)
+    }
+
+    pub fn set_app_enabled(&self, pkg: String, on: bool) {
+        self.lock().set_app_enabled(&pkg, on);
+    }
+
+    /// `None` returns the app to the live EQ; a key that does not resolve is `NotFound`.
+    pub fn set_app_preset(&self, pkg: String, key: Option<String>) -> Result<(), EqError> {
+        self.lock().set_app_preset(&pkg, key.as_deref())
+    }
+
+    pub fn app_rules(&self) -> Vec<AppRuleInfo> {
+        self.lock()
+            .app_rules()
+            .iter()
+            .map(|r| AppRuleInfo {
+                pkg: r.pkg.clone(),
+                enabled: r.enabled,
+                preset_key: r.preset_key.clone(),
+                last_seen: r.last_seen,
+            })
+            .collect()
+    }
+
     pub fn begin_edit(&self) {
         self.lock().begin_edit();
     }
@@ -262,24 +298,40 @@ impl EqCore {
         sample_rate: u32,
         frame_duration_ms: f32,
     ) -> Result<EngineParams, EqError> {
-        let e = self.lock().engine_params(sample_rate, frame_duration_ms)?;
-        Ok(EngineParams {
-            sample_rate: e.sample_rate,
-            frame_duration_ms: e.frame_duration_ms,
-            block_size: e.block_size,
-            cutoffs_hz: e.cutoffs_hz,
-            gains_db: e.gains_db,
-            input_gain_db: e.input_gain_db,
-            input_gain_left_db: e.input_gain_left_db,
-            input_gain_right_db: e.input_gain_right_db,
-            limiter: e.limiter,
-            limiter_enabled: e.limiter_enabled,
-            bypass: e.bypass,
-            peak_db: e.peak_db,
-            suggested_preamp_db: e.suggested_preamp_db,
-            headroom_after_preamp_db: e.headroom_after_preamp_db,
-            layout_id: e.layout_id,
-        })
+        self.lock().engine_params(sample_rate, frame_duration_ms).map(to_params)
+    }
+
+    /// The params `apply_preset(key)` would give, without applying it: live state, the active
+    /// preset and undo history stay as they are. Uses the live limiter flag, bypass and band cap.
+    pub fn engine_params_for_preset(
+        &self,
+        key: String,
+        sample_rate: u32,
+        frame_duration_ms: f32,
+    ) -> Result<EngineParams, EqError> {
+        self.lock()
+            .engine_params_for_preset(&key, sample_rate, frame_duration_ms)
+            .map(to_params)
+    }
+}
+
+fn to_params(e: Engine) -> EngineParams {
+    EngineParams {
+        sample_rate: e.sample_rate,
+        frame_duration_ms: e.frame_duration_ms,
+        block_size: e.block_size,
+        cutoffs_hz: e.cutoffs_hz,
+        gains_db: e.gains_db,
+        input_gain_db: e.input_gain_db,
+        input_gain_left_db: e.input_gain_left_db,
+        input_gain_right_db: e.input_gain_right_db,
+        limiter: e.limiter,
+        limiter_enabled: e.limiter_enabled,
+        bypass: e.bypass,
+        peak_db: e.peak_db,
+        suggested_preamp_db: e.suggested_preamp_db,
+        headroom_after_preamp_db: e.headroom_after_preamp_db,
+        layout_id: e.layout_id,
     }
 }
 
