@@ -50,6 +50,15 @@ pub struct AppRuleInfo {
     pub last_seen: u64,
 }
 
+/// One per-device rule. `preset_key` of `None` keeps the current sound.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DeviceRuleInfo {
+    pub key: String,
+    pub name: String,
+    pub preset_key: Option<String>,
+    pub last_seen: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct CurveData {
     pub freqs_hz: Vec<f32>,
@@ -259,6 +268,35 @@ impl EqCore {
             .collect()
     }
 
+    /// Records that an output device is in use. True when a rule was added. Not an undo step.
+    pub fn note_device(&self, key: String, name: String) -> bool {
+        self.lock().note_device(&key, &name)
+    }
+
+    /// `None` keeps the current sound; a key that does not resolve is `NotFound`.
+    pub fn set_device_preset(&self, key: String, preset_key: Option<String>) -> Result<(), EqError> {
+        self.lock().set_device_preset(&key, preset_key.as_deref())
+    }
+
+    pub fn device_rules(&self) -> Vec<DeviceRuleInfo> {
+        self.lock()
+            .device_rules()
+            .iter()
+            .map(|r| DeviceRuleInfo {
+                key: r.key.clone(),
+                name: r.name.clone(),
+                preset_key: r.preset_key.clone(),
+                last_seen: r.last_seen,
+            })
+            .collect()
+    }
+
+    /// Records the output device now in use. Returns the preset key to apply, only when the device
+    /// differs from the last one recorded and has a preset. Applying it is up to the caller.
+    pub fn record_device(&self, key: String, name: String) -> Option<String> {
+        self.lock().record_device(&key, &name)
+    }
+
     pub fn begin_edit(&self) {
         self.lock().begin_edit();
     }
@@ -341,6 +379,29 @@ pub const DEFAULT_FRAME_DURATION_MS: f32 = DEFAULT_FRAME_MS;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_rules_work_through_the_core() {
+        let c = EqCore::new();
+        assert!(c.note_device("speaker".into(), "Phone speaker".into()));
+        assert!(!c.note_device("speaker".into(), "Phone speaker".into()));
+        assert_eq!(
+            c.set_device_preset("usb:DAC".into(), Some("user:Nope".into())),
+            Err(EqError::NotFound)
+        );
+        c.set_device_preset("usb:DAC".into(), Some("builtin:Bass".into())).unwrap();
+        assert_eq!(c.record_device("speaker".into(), "Phone speaker".into()), None);
+        assert_eq!(
+            c.record_device("usb:DAC".into(), "USB: DAC".into()).as_deref(),
+            Some("builtin:Bass")
+        );
+        assert_eq!(c.record_device("usb:DAC".into(), "USB: DAC".into()), None);
+        let rules = c.device_rules();
+        assert_eq!(rules.len(), 2);
+        let usb = rules.iter().find(|r| r.key == "usb:DAC").unwrap();
+        assert_eq!(usb.name, "USB: DAC");
+        assert_eq!(usb.preset_key.as_deref(), Some("builtin:Bass"));
+    }
 
     #[test]
     fn version_is_semver_like() {
