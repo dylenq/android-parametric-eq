@@ -108,6 +108,12 @@ impl EqCore {
         persist::save(&path, &self.lock())
     }
 
+    /// How many saved entries the load dropped or reset to a default (0 for a clean file and
+    /// for a new core). Not saved and not part of the snapshot.
+    pub fn load_repairs(&self) -> u32 {
+        self.lock().load_repairs
+    }
+
     pub fn snapshot(&self) -> Snapshot {
         let s = self.lock();
         let mut list: Vec<PresetInfo> = presets::builtin_presets()

@@ -48,6 +48,9 @@ pub struct Inner {
     pub(crate) history: History,
     /// Device state, never saved or put in undo history: the most bands the engine accepts.
     pub(crate) engine_band_cap: Option<usize>,
+    /// How many saved entries the last load dropped or reset to a default. Never saved, not in
+    /// undo history and not part of `Snapshot`; the app reads it once after opening the file.
+    pub load_repairs: u32,
 }
 
 impl Default for Inner {
@@ -67,6 +70,7 @@ impl Default for Inner {
             active_preset: None,
             history: History::default(),
             engine_band_cap: None,
+            load_repairs: 0,
         }
     }
 }

@@ -166,13 +166,31 @@ pub fn parse(bytes: &[u8]) -> Result<Inner, EqError> {
     if version == 0 {
         return Err(EqError::Corrupt);
     }
-    // Presets are read apart from the rest so a damaged one costs only itself, never the file.
+    // Presets and bands are read apart from the rest so a damaged one costs only itself, never the file.
     let mut value = value;
     let (raw_presets, raw_active) = match value.as_object_mut() {
         Some(o) => (o.remove("presets"), o.remove("active_preset")),
         None => (None, None),
     };
+    let raw_bands = value
+        .get_mut("parametric")
+        .and_then(|p| p.as_object_mut())
+        .filter(|p| p.get("bands").is_some_and(|b| b.is_array()))
+        .and_then(|p| p.remove("bands"));
+    let mut repairs: u32 = 0;
     let mut state: PersistedState = serde_json::from_value(value).map_err(|_| EqError::Corrupt)?;
+    if let Some(serde_json::Value::Array(items)) = raw_bands {
+        state.parametric.bands = items
+            .into_iter()
+            .filter_map(|v| match serde_json::from_value::<Band>(v) {
+                Ok(b) if b.freq.is_finite() && b.gain_db.is_finite() && b.q.is_finite() => Some(b),
+                _ => {
+                    repairs = repairs.saturating_add(1);
+                    None
+                }
+            })
+            .collect();
+    }
     state.presets = match raw_presets {
         Some(serde_json::Value::Array(items)) => items
             .into_iter()
@@ -181,7 +199,9 @@ pub fn parse(bytes: &[u8]) -> Result<Inner, EqError> {
         _ => Vec::new(),
     };
     state.active_preset = raw_active.and_then(|v| v.as_str().map(String::from));
-    Ok(sanitize(state)?.into_inner())
+    let mut inner = sanitize(state)?.into_inner();
+    inner.load_repairs = repairs;
+    Ok(inner)
 }
 
 pub fn load(path: &str) -> Result<Inner, EqError> {

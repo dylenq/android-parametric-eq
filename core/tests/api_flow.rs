@@ -265,6 +265,53 @@ fn save_then_load_through_eqcore_equals_snapshot() {
     assert!(matches!(EqCore::load(path), Err(EqError::Io(_))));
 }
 
+/// A saved state with a custom three band list, one user preset and the active key pointing at it.
+fn saved_state_json(middle_freq: serde_json::Value) -> String {
+    let core = EqCore::new();
+    core.set_mode(EqMode::Parametric);
+    core.set_preamp(-3.0).unwrap();
+    core.set_bass(2.0).unwrap();
+    core.save_preset("Mine".to_string()).unwrap();
+    let path = std::env::temp_dir()
+        .join(format!("eqcore-repairs-src-{}.json", std::process::id()))
+        .to_string_lossy()
+        .into_owned();
+    core.save(path.clone()).unwrap();
+    let mut v: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let band = |freq: serde_json::Value| {
+        serde_json::json!({"kind": "Peak", "freq": freq, "gain_db": 1.0, "q": 1.0, "enabled": true})
+    };
+    v["parametric"]["bands"] = serde_json::json!([band(100.0.into()), band(middle_freq), band(5000.0.into())]);
+    serde_json::to_string(&v).unwrap()
+}
+
+#[test]
+fn load_reports_one_dropped_band_and_keeps_everything_else() {
+    let path = std::env::temp_dir()
+        .join(format!("eqcore-repairs-{}.json", std::process::id()))
+        .to_string_lossy()
+        .into_owned();
+    std::fs::write(&path, saved_state_json(serde_json::json!("loud"))).unwrap();
+    let loaded = EqCore::load(path.clone()).unwrap();
+    let s = loaded.snapshot();
+    assert_eq!(s.mode, EqMode::Parametric);
+    assert_eq!(s.bands.iter().map(|b| b.freq).collect::<Vec<_>>(), [100.0, 5000.0]);
+    assert_eq!(s.preamp_db, -3.0);
+    assert_eq!(s.bass_db, 2.0);
+    assert_eq!(s.active_preset_key.as_deref(), Some("user:Mine"));
+    assert!(s.presets.iter().any(|p| p.key == "user:Mine"));
+    assert_eq!(loaded.load_repairs(), 1);
+
+    // The same file with nothing wrong in it loads with no repairs, and a new core has none.
+    std::fs::write(&path, saved_state_json(serde_json::json!(2000.0))).unwrap();
+    let clean = EqCore::load(path.clone()).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(clean.snapshot().bands.len(), 3);
+    assert_eq!(clean.load_repairs(), 0);
+    assert_eq!(EqCore::new().load_repairs(), 0);
+}
+
 #[test]
 fn snapshot_centres_match_graphic_centres() {
     let core = EqCore::new();
