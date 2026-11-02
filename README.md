@@ -25,7 +25,7 @@ It has a graphic mode (5, 10, 15 or 31 bands, plus or minus 12 dB per slider) an
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-parametric-dark.png">
   <img src="docs/screenshot-parametric-light.png" width="320" alt="The Parametric mode with the Desk speakers preset active: a curve with draggable band nodes and a list of bands below">
 </picture>
-<img src="docs/screenshot-settings.png" width="320" alt="Settings: global mode, start when the phone turns on, detected audio sessions, engine bands 512 (measured), version 0.3.0">
+<img src="docs/screenshot-settings.png" width="320" alt="Settings further down: the Apps list, Output devices with the phone speaker in use, detected audio sessions, engine bands 512 (measured), version 0.3.0">
 
 </div>
 
