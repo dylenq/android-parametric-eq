@@ -24,6 +24,10 @@ pub enum EqError {
     ReadOnly,
     #[error("you can keep up to 100 presets")]
     TooManyPresets,
+    #[error("That is not an EQ file. Choose a ParametricEQ.txt or GraphicEQ.txt.")]
+    NotAnEqFile,
+    #[error("That file is over 1 MB, too large to be an EQ file.")]
+    FileTooLarge,
 }
 
 impl From<crate::model::GraphicError> for EqError {

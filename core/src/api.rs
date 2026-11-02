@@ -34,6 +34,27 @@ pub struct Snapshot {
     pub preset_modified: bool,
 }
 
+/// Which AutoEq format a file was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum ImportKind {
+    Parametric,
+    Graphic,
+}
+
+/// What an import made. The preset is stored, not applied.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct ImportReport {
+    pub key: String,
+    pub name: String,
+    pub kind: ImportKind,
+    /// Parametric filters kept, or graphic bands made.
+    pub filters: u32,
+    /// Filters or curve points the file had that could not be used.
+    pub skipped: u32,
+    /// Graphic bands whose value was cut back to the slider range.
+    pub clamped: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct PresetInfo {
     pub key: String,
@@ -229,6 +250,22 @@ impl EqCore {
         self.lock().apply_preset(&key)
     }
 
+    /// Turns the text of a ParametricEQ.txt or GraphicEQ.txt into a user preset, named after
+    /// the file. Does not apply it. Nothing changes on error.
+    pub fn import_eq_text(
+        &self,
+        file_name: String,
+        text: String,
+        graphic_band_count: u32,
+    ) -> Result<ImportReport, EqError> {
+        todo!()
+    }
+
+    /// The live parametric bands and preamp as ParametricEQ.txt text, in any mode.
+    pub fn export_parametric_text(&self) -> String {
+        todo!()
+    }
+
     pub fn save_preset(&self, name: String) -> Result<String, EqError> {
         self.lock().save_preset(&name)
     }
@@ -407,5 +444,105 @@ mod tests {
     fn version_is_semver_like() {
         let v = EqCore::new().version();
         assert!(v.chars().next().is_some_and(|c| c.is_ascii_digit()));
+    }
+
+    const AUTOEQ: &str = "Preamp: -6.2 dB\n\
+        Filter 1: ON LSC Fc 105 Hz Gain 5.5 dB Q 0.70\n\
+        Filter 2: ON PK Fc 180 Hz Gain -2.3 dB Q 1.20\n";
+
+    #[test]
+    fn import_stores_a_preset_without_applying_it() {
+        let c = EqCore::new();
+        c.set_preamp(-1.0).unwrap();
+        let before = c.snapshot();
+        let r = c.import_eq_text("HD 650 ParametricEQ.txt".into(), AUTOEQ.into(), 10).unwrap();
+        assert_eq!((r.name.as_str(), r.key.as_str()), ("HD 650", "user:HD 650"));
+        assert_eq!((r.kind, r.filters, r.skipped, r.clamped), (ImportKind::Parametric, 2, 0, 0));
+        let after = c.snapshot();
+        assert_eq!(after.presets.len(), before.presets.len() + 1);
+        assert_eq!(after.preamp_db, before.preamp_db);
+        assert_eq!(after.bands, before.bands);
+        assert_eq!(after.active_preset_key, before.active_preset_key);
+        assert_eq!(after.can_undo, before.can_undo);
+        // Applying it gives the file's sound: parametric, file preamp, zero tone, centred.
+        c.apply_preset(r.key).unwrap();
+        let s = c.snapshot();
+        assert_eq!(s.mode, EqMode::Parametric);
+        assert_eq!((s.bands.len(), s.preamp_db, s.bass_db, s.treble_db, s.balance), (2, -6.2, 0.0, 0.0, 0.0));
+        assert_eq!(s.graphic_band_count, 10);
+        assert_eq!(s.graphic_gains_db, vec![0.0; 10]);
+    }
+
+    #[test]
+    fn a_graphic_import_makes_a_graphic_preset() {
+        let c = EqCore::new();
+        let r = c
+            .import_eq_text("Buds GraphicEQ.txt".into(), "Preamp: -2 dB\nGraphicEQ: 20 3; 20000 3\n".into(), 15)
+            .unwrap();
+        assert_eq!((r.kind, r.filters, r.name.as_str()), (ImportKind::Graphic, 15, "Buds"));
+        c.apply_preset(r.key).unwrap();
+        let s = c.snapshot();
+        assert_eq!((s.mode, s.graphic_band_count, s.preamp_db), (EqMode::Graphic, 15, -2.0));
+        assert!(s.graphic_gains_db.iter().all(|g| (g - 3.0).abs() < 1e-4));
+        assert_eq!(s.bands, crate::model::EqState::default().bands);
+    }
+
+    #[test]
+    fn clashing_imports_get_numbers() {
+        let c = EqCore::new();
+        let a = c.import_eq_text("Flat.txt".into(), AUTOEQ.into(), 10).unwrap();
+        let b = c.import_eq_text("Flat.txt".into(), AUTOEQ.into(), 10).unwrap();
+        let d = c.import_eq_text("Flat.txt".into(), AUTOEQ.into(), 10).unwrap();
+        assert_eq!((a.name.as_str(), b.name.as_str(), d.name.as_str()), ("Flat 2", "Flat 3", "Flat 4"));
+    }
+
+    #[test]
+    fn failed_imports_change_nothing() {
+        let c = EqCore::new();
+        c.import_eq_text("One.txt".into(), AUTOEQ.into(), 10).unwrap();
+        c.apply_preset("user:One".into()).unwrap();
+        let before = c.snapshot();
+        let big = format!("{AUTOEQ}{}", "# padding\n".repeat(120_000));
+        for (text, count, want) in [
+            ("Dear diary: hi", 10, EqError::NotAnEqFile),
+            ("Preamp: -3 dB\n", 10, EqError::NotAnEqFile),
+            (big.as_str(), 10, EqError::FileTooLarge),
+            (AUTOEQ, 7, EqError::InvalidValue),
+        ] {
+            assert_eq!(c.import_eq_text("x.txt".into(), text.into(), count), Err(want));
+            assert_eq!(c.snapshot(), before);
+        }
+    }
+
+    #[test]
+    fn a_full_preset_list_refuses_the_import_untouched() {
+        let c = EqCore::new();
+        for i in 0..100 {
+            c.save_preset(format!("P{i}")).unwrap();
+        }
+        let before = c.snapshot();
+        assert_eq!(
+            c.import_eq_text("New.txt".into(), AUTOEQ.into(), 10),
+            Err(EqError::TooManyPresets)
+        );
+        assert_eq!(c.snapshot(), before);
+    }
+
+    #[test]
+    fn export_then_import_returns_the_live_bands() {
+        let c = EqCore::new();
+        c.set_preamp(-4.25).unwrap();
+        let text = c.export_parametric_text();
+        assert!(text.starts_with("Preamp: -4.25 dB\nFilter 1: ON LSC Fc 80 Hz"));
+        let r = c.import_eq_text("Mine.txt".into(), text, 10).unwrap();
+        c.apply_preset(r.key).unwrap();
+        let s = c.snapshot();
+        assert_eq!(s.bands, crate::model::EqState::default().bands);
+        assert_eq!(s.preamp_db, -4.25);
+        // Exporting works in graphic mode too and does not mark the state.
+        c.set_mode(EqMode::Graphic);
+        let before = c.snapshot();
+        assert!(c.export_parametric_text().contains("Filter 1:"));
+        assert_eq!(c.snapshot(), before);
     }
 }

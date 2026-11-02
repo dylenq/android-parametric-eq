@@ -6,14 +6,13 @@ pub mod achieved;
 pub mod api;
 pub mod dsp;
 pub mod error;
+pub(crate) mod export;
 pub mod fit;
 pub mod graphic;
 pub mod grid;
 pub mod headroom;
 pub mod history;
 pub mod inner;
-// Parser kept for presets (v2); not exported over FFI.
-#[allow(dead_code)]
 pub(crate) mod import;
 pub mod model;
 pub mod persist;

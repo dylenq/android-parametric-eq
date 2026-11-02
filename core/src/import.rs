@@ -1,9 +1,10 @@
 // Origin: macOS EQ app src/import.rs, commit 03be7aa, GPL-3.0.
 // Ported for Android; only `crate::state` -> `crate::model` and pub(crate) visibility changed.
-// Crate-internal in v1 (presets are v2), so it is not exported over FFI.
 
-use crate::model::{Band, Curve, FilterKind, MAX_BANDS, MAX_GAIN_DB};
-use std::path::Path;
+use crate::api::ImportKind;
+use crate::error::EqError;
+use crate::graphic;
+use crate::model::{Band, Curve, FilterKind, GRAPHIC_MAX_DB, MAX_BANDS, MAX_GAIN_DB};
 
 /// A curve read from an Equalizer APO configuration, the format AutoEq publishes its
 /// headphone corrections in (`ParametricEQ.txt`).
@@ -78,14 +79,25 @@ pub(crate) fn parse(text: &str) -> Result<Imported, String> {
     }
 }
 
-/// Reads a configuration file. Returns a preset name taken from the file name with it.
-pub(crate) fn read(path: &Path) -> Result<(String, Imported), String> {
-    let text = std::fs::read_to_string(path).map_err(|error| format!("Could not read file: {error}"))?;
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Imported");
-    // AutoEq names its files "Sennheiser HD 650 ParametricEQ.txt".
-    let name = stem.strip_suffix("ParametricEQ").unwrap_or(stem).trim();
-    let name = if name.is_empty() { "Imported" } else { name };
-    Ok((name.to_owned(), parse(&text)?))
+/// What `parse_any` found, ready to become a preset.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Parsed {
+    pub kind: ImportKind,
+    /// Parametric files only.
+    pub bands: Vec<Band>,
+    /// Graphic files only: one gain per centre of the requested layout.
+    pub graphic_gains: Vec<f32>,
+    pub preamp_db: f32,
+    pub skipped: usize,
+    pub clamped: usize,
+}
+
+pub(crate) fn parse_any(_text: &str, _graphic_band_count: u32) -> Result<Parsed, EqError> {
+    todo!()
+}
+
+pub(crate) fn preset_name(_file_name: &str, _taken: &[String]) -> String {
+    todo!()
 }
 
 #[cfg(test)]
@@ -150,19 +162,214 @@ Filter 4: ON HSC Fc 10000 Hz Gain -3.0 dB Q 0.70
     }
 
     #[test]
-    fn names_the_preset_after_the_file() {
-        let path = std::env::temp_dir().join("eq-test Sennheiser HD 650 ParametricEQ.txt");
-        std::fs::write(&path, AUTOEQ).unwrap();
-        let (name, imported) = read(&path).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(name, "eq-test Sennheiser HD 650");
-        assert_eq!(imported.curve.bands.len(), 4);
-        assert!(read(&path).is_err());
-    }
-
-    #[test]
     fn rejects_files_that_are_something_else() {
         assert!(parse("").is_err());
         assert!(parse("Dear diary: today I boosted the bass\n").is_err());
+    }
+
+    // ---- parse_any: format detection and the GraphicEQ path ----
+
+    fn graphic_text(points: &[(f32, f32)]) -> String {
+        let body: Vec<String> = points.iter().map(|(f, g)| format!("{f} {g}")).collect();
+        format!("GraphicEQ: {}\n", body.join("; "))
+    }
+
+    /// A curve with points at every 1/12 octave from 20 Hz to 20 kHz.
+    fn dense(f: impl Fn(f32) -> f32) -> Vec<(f32, f32)> {
+        let n = (12.0 * (1000.0f32).log2()).round() as usize;
+        (0..=n)
+            .map(|i| {
+                let hz = 20.0 * 2f32.powf(i as f32 / 12.0);
+                (hz, f(hz))
+            })
+            .collect()
+    }
+
+    const REAL_GRAPHIC: &str = "GraphicEQ: 20 -5.2; 21 -5.1; 22 -5.0; 100 -2.5; 1000 0.5; 3000 4.5; 10000 2.0; 20000 3.0\n";
+
+    #[test]
+    fn detects_the_format_by_the_graphiceq_line() {
+        let g = parse_any(REAL_GRAPHIC, 10).unwrap();
+        assert_eq!(g.kind, ImportKind::Graphic);
+        assert_eq!(g.graphic_gains.len(), 10);
+        assert!(g.bands.is_empty());
+        let p = parse_any(AUTOEQ, 10).unwrap();
+        assert_eq!(p.kind, ImportKind::Parametric);
+        assert_eq!(p.bands.len(), 4);
+        assert!(p.graphic_gains.is_empty());
+        assert_eq!(p.preamp_db, -6.2);
+        let with_preamp = format!("Preamp: -4.5 dB\n{REAL_GRAPHIC}");
+        let g = parse_any(&with_preamp, 15).unwrap();
+        assert_eq!((g.kind, g.preamp_db, g.graphic_gains.len()), (ImportKind::Graphic, -4.5, 15));
+        assert_eq!(parse_any(REAL_GRAPHIC, 5).unwrap().preamp_db, 0.0);
+    }
+
+    #[test]
+    fn tolerates_a_byte_order_mark_and_windows_line_ends() {
+        let text = format!("\u{feff}{}", AUTOEQ.replace('\n', "\r\n"));
+        assert_eq!(parse_any(&text, 10).unwrap().bands.len(), 4);
+        let text = format!("\u{feff}Preamp: -2 dB\r\n{}", REAL_GRAPHIC.replace('\n', "\r\n"));
+        assert_eq!(parse_any(&text, 10).unwrap().kind, ImportKind::Graphic);
+    }
+
+    #[test]
+    fn a_flat_graphic_curve_stays_flat_on_every_layout() {
+        for count in [5, 10, 15, 31] {
+            let g = parse_any(&graphic_text(&dense(|_| 0.0)), count).unwrap();
+            assert_eq!(g.graphic_gains, vec![0.0; count as usize], "{count} bands");
+            assert_eq!((g.skipped, g.clamped), (0, 0));
+        }
+        let g = parse_any(&graphic_text(&dense(|_| -3.0)), 31).unwrap();
+        assert!(g.graphic_gains.iter().all(|v| (v + 3.0).abs() < 1e-4));
+    }
+
+    #[test]
+    fn a_falling_slope_stays_non_increasing() {
+        for count in [5, 10, 15, 31] {
+            let g = parse_any(&graphic_text(&dense(|hz| -4.0 * (hz / 20.0).log2())), count).unwrap();
+            assert!(
+                g.graphic_gains.windows(2).all(|w| w[1] <= w[0]),
+                "{count} bands: {:?}",
+                g.graphic_gains
+            );
+            assert!(g.graphic_gains[0] > g.graphic_gains[count as usize - 1]);
+        }
+    }
+
+    #[test]
+    fn unsorted_points_are_sorted() {
+        let sorted = parse_any("GraphicEQ: 20 1; 200 2; 2000 3; 20000 4\n", 10).unwrap();
+        let shuffled = parse_any("GraphicEQ: 2000 3; 20 1; 20000 4; 200 2\n", 10).unwrap();
+        assert_eq!(sorted.graphic_gains, shuffled.graphic_gains);
+        assert_eq!(shuffled.skipped, 0);
+    }
+
+    #[test]
+    fn unusable_graphic_points_are_dropped_and_counted() {
+        let g = parse_any(
+            "GraphicEQ: 0 3; -100 3; 100 NaN; 100 inf; abc 1; 1000 2; 1000; 5000 2\n",
+            10,
+        )
+        .unwrap();
+        assert_eq!(g.skipped, 7);
+        // The two usable points are both +2 dB, so the curve is a flat +2 everywhere.
+        assert!(g.graphic_gains.iter().all(|v| (v - 2.0).abs() < 1e-4));
+    }
+
+    #[test]
+    fn a_narrow_spike_raises_the_band_it_sits_in() {
+        let mut points = dense(|_| 0.0);
+        // 3 dB at 1 kHz only, well inside the 1 kHz band of the 31-band layout.
+        points.retain(|p| (p.0 - 1000.0).abs() > 150.0 || p.0 == 1000.0);
+        let spike = points.iter().position(|p| p.0 > 900.0).unwrap();
+        points.insert(spike, (950.0, 0.0));
+        points.insert(spike + 1, (1000.0, 3.0));
+        points.insert(spike + 2, (1050.0, 0.0));
+        let g = parse_any(&graphic_text(&points), 31).unwrap();
+        let at = graphic::centres(31).unwrap().iter().position(|&c| c == 1000.0).unwrap();
+        assert!(g.graphic_gains[at] > 0.1, "{}", g.graphic_gains[at]);
+        assert!(g.graphic_gains[at] < 3.0, "a mean, not a point sample");
+    }
+
+    #[test]
+    fn out_of_range_values_clamp_and_are_counted() {
+        let g = parse_any("GraphicEQ: 20 40; 200 -40; 20000 0\n", 10).unwrap();
+        assert!(g.clamped >= 2, "{}", g.clamped);
+        assert!(g.graphic_gains.iter().all(|v| v.abs() <= GRAPHIC_MAX_DB));
+        assert_eq!(g.graphic_gains[0], GRAPHIC_MAX_DB);
+        let calm = parse_any(REAL_GRAPHIC, 10).unwrap();
+        assert_eq!(calm.clamped, 0);
+    }
+
+    #[test]
+    fn the_ends_are_held_outside_the_files_range() {
+        let g = parse_any("GraphicEQ: 1000 5; 2000 5\n", 10).unwrap();
+        assert!(g.graphic_gains.iter().all(|v| (v - 5.0).abs() < 1e-4));
+    }
+
+    // ---- names ----
+
+    fn taken(names: &[&str]) -> Vec<String> {
+        names.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn names_the_preset_after_the_file() {
+        let none = taken(&[]);
+        assert_eq!(preset_name("Sennheiser HD 650 ParametricEQ.txt", &none), "Sennheiser HD 650");
+        assert_eq!(preset_name("X GraphicEQ.txt", &none), "X");
+        assert_eq!(preset_name("x graphiceq.TXT", &none), "x");
+        assert_eq!(preset_name("ParametricEQ.txt", &none), "Imported");
+        assert_eq!(preset_name("  .txt", &none), "Imported");
+        assert_eq!(preset_name("", &none), "Imported");
+        assert_eq!(preset_name("My phones", &none), "My phones");
+    }
+
+    #[test]
+    fn long_names_truncate_on_a_char_boundary() {
+        let none = taken(&[]);
+        let name = preset_name(&format!("{}.txt", "é".repeat(60)), &none);
+        assert_eq!(name, "é".repeat(40));
+        let name = preset_name(&format!("{} ParametricEQ.txt", "日".repeat(60)), &none);
+        assert_eq!(name.chars().count(), 40);
+        assert!(crate::presets::validate_name(&name).is_ok());
+    }
+
+    #[test]
+    fn clashes_get_a_number_and_never_overwrite() {
+        assert_eq!(preset_name("Flat.txt", &taken(&[])), "Flat 2");
+        assert_eq!(preset_name("flat ParametricEQ.txt", &taken(&[])), "flat 2");
+        let user = taken(&["HD 650"]);
+        assert_eq!(preset_name("HD 650 ParametricEQ.txt", &user), "HD 650 2");
+        let user = taken(&["HD 650", "hd 650 2"]);
+        assert_eq!(preset_name("HD 650 ParametricEQ.txt", &user), "HD 650 3");
+        let user = taken(&["Flat", "Flat 2"]);
+        assert_eq!(preset_name("Flat.txt", &user), "Flat 3");
+    }
+
+    #[test]
+    fn a_clash_on_a_full_length_name_still_fits() {
+        let long = "a".repeat(40);
+        let name = preset_name(&format!("{long}.txt"), &taken(&[&long]));
+        assert_eq!(name.chars().count(), 40);
+        assert!(name.ends_with(" 2"));
+        assert!(crate::presets::validate_name(&name).is_ok());
+    }
+
+    #[test]
+    fn control_characters_never_reach_a_name() {
+        let name = preset_name("bad\nname\u{7}.txt", &taken(&[]));
+        assert!(crate::presets::validate_name(&name).is_ok());
+    }
+
+    // ---- errors ----
+
+    #[test]
+    fn files_that_are_not_eq_files_are_typed_errors() {
+        for text in ["", "Dear diary: today I boosted the bass\n", "GraphicEQ: \n", "GraphicEQ: x y; z\n"] {
+            assert_eq!(parse_any(text, 10), Err(EqError::NotAnEqFile), "{text:?}");
+        }
+        assert_eq!(parse_any("binary\0stuff Filter 1: ON PK Fc 1000 Hz Gain 1 dB", 10), Err(EqError::NotAnEqFile));
+    }
+
+    #[test]
+    fn a_preamp_only_file_is_rejected() {
+        assert_eq!(parse_any("Preamp: -3 dB\n", 10), Err(EqError::NotAnEqFile));
+        // Every filter unusable would also be a blank preset.
+        assert_eq!(parse_any("Preamp: -3 dB\nFilter 1: ON NO Fc 50 Hz\n", 10), Err(EqError::NotAnEqFile));
+    }
+
+    #[test]
+    fn oversize_text_is_rejected_by_the_core() {
+        let mut text = String::from(AUTOEQ);
+        text.push_str(&"# padding\n".repeat(120_000));
+        assert!(text.len() > 1_000_000);
+        assert_eq!(parse_any(&text, 10), Err(EqError::FileTooLarge));
+    }
+
+    #[test]
+    fn an_unsupported_layout_is_invalid() {
+        assert_eq!(parse_any(AUTOEQ, 7), Err(EqError::InvalidValue));
+        assert_eq!(parse_any(REAL_GRAPHIC, 0), Err(EqError::InvalidValue));
     }
 }
