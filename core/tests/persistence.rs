@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use eq_core::error::EqError;
 use eq_core::inner::Inner;
-use eq_core::model::{Band, EqMode, FilterKind};
+use eq_core::model::{Band, EqMode, FilterKind, GraphicState};
 use eq_core::persist::{self, PersistedState};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -148,21 +148,47 @@ fn out_of_range_values_are_clamped() {
 }
 
 #[test]
-fn bad_graphic_state_is_corrupt() {
+fn bad_graphic_block_falls_back_to_the_default_graphic_state() {
+    // Was `bad_graphic_state_is_corrupt`: a damaged graphic block now costs only itself (D-06).
     let bad_count = r#"{"version":1,"graphic":{"band_count":7,"gains_db":[0,0,0,0,0,0,0]}}"#;
     let bad_len = r#"{"version":1,"graphic":{"band_count":10,"gains_db":[0,0,0]}}"#;
-    assert_eq!(persist::parse(bad_count.as_bytes()).err(), Some(EqError::Corrupt));
-    assert_eq!(persist::parse(bad_len.as_bytes()).err(), Some(EqError::Corrupt));
+    let string = r#"{"version":1,"graphic":"loud"}"#;
+    let empty = r#"{"version":1,"graphic":{}}"#;
+    for j in [bad_count, bad_len, string, empty] {
+        let s = persist::parse(j.as_bytes()).unwrap();
+        assert_eq!(s.graphic, GraphicState::default(), "{j}");
+        assert_eq!(s.load_repairs, 1, "{j}");
+    }
+    // Everything beside the graphic block is kept.
+    let j = r#"{"version":1,"mode":"Parametric","preamp_db":-2.5,"graphic":{"band_count":7,"gains_db":[]}}"#;
+    let s = persist::parse(j.as_bytes()).unwrap();
+    assert_eq!((s.mode, s.preamp_db, s.load_repairs), (EqMode::Parametric, -2.5, 1));
+    // A valid graphic block stays as it is.
+    let ok = r#"{"version":1,"graphic":{"band_count":5,"gains_db":[1,2,3,4,50]}}"#;
+    let s = persist::parse(ok.as_bytes()).unwrap();
+    assert_eq!((s.graphic.band_count, s.graphic.gains_db.clone(), s.load_repairs), (5, vec![1.0, 2.0, 3.0, 4.0, 24.0], 0));
 }
 
 #[test]
-fn non_finite_numbers_are_corrupt() {
+fn number_literals_serde_refuses_are_corrupt_and_other_non_finite_values_are_repaired() {
+    // Was `non_finite_numbers_are_corrupt`. serde_json rejects `1e999` while reading the text
+    // ("number out of range"), so those stay a syntax error and stay Corrupt (D-05). A value that
+    // reads fine but is not usable (null, a number too large for an f32) is repaired (D-06).
     let inf = r#"{"version":1,"preamp_db":1e999}"#;
-    let null = r#"{"version":1,"preamp_db":null}"#;
     let band = r#"{"version":1,"parametric":{"bands":[{"kind":"Peak","freq":1e999,"gain_db":0,"q":1,"enabled":true}]}}"#;
-    for j in [inf, null, band] {
+    for j in [inf, band] {
         assert_eq!(persist::parse(j.as_bytes()).err(), Some(EqError::Corrupt), "{j}");
     }
+    let null = r#"{"version":1,"bass_db":2.0,"preamp_db":null}"#;
+    let s = persist::parse(null.as_bytes()).unwrap();
+    assert_eq!((s.preamp_db, s.bass_db, s.load_repairs), (0.0, 2.0, 1));
+    // 1e39 reads as a number but overflows an f32 to infinity.
+    let too_big = r#"{"version":1,"treble_db":1e39,"bass_db":2.0}"#;
+    let s = persist::parse(too_big.as_bytes()).unwrap();
+    assert_eq!((s.treble_db, s.bass_db, s.load_repairs), (0.0, 2.0, 1));
+    let big_band = r#"{"version":1,"parametric":{"bands":[{"kind":"Peak","freq":1e39,"gain_db":0,"q":1,"enabled":true}]}}"#;
+    let s = persist::parse(big_band.as_bytes()).unwrap();
+    assert_eq!((s.parametric.len(), s.load_repairs), (0, 1));
 }
 
 #[test]
@@ -256,13 +282,13 @@ fn tone_and_balance_clamp_and_non_finite() {
     assert_eq!((s.bass_db, s.treble_db, s.balance), (12.0, -12.0, -1.0));
     let s = persist::parse(br#"{"version":1,"balance":0.005}"#).unwrap();
     assert_eq!(s.balance, 0.0);
-    for bad in [
-        r#"{"version":1,"bass_db":1e999}"#,
-        r#"{"version":1,"treble_db":-1e999}"#,
-        r#"{"version":1,"balance":null}"#,
-        r#"{"version":1,"balance":"x"}"#,
-    ] {
+    // The two literals serde_json refuses stay Corrupt; null and text are now repaired (D-05, D-06).
+    for bad in [r#"{"version":1,"bass_db":1e999}"#, r#"{"version":1,"treble_db":-1e999}"#] {
         assert!(matches!(persist::parse(bad.as_bytes()), Err(EqError::Corrupt)), "{bad}");
+    }
+    for bad in [r#"{"version":1,"balance":null}"#, r#"{"version":1,"balance":"x"}"#] {
+        let s = persist::parse(bad.as_bytes()).unwrap();
+        assert_eq!((s.balance, s.load_repairs), (0.0, 1), "{bad}");
     }
     assert_eq!(persist::SCHEMA_VERSION, 1);
 }
@@ -344,15 +370,24 @@ fn presets_bad_ones_are_dropped_individually() {
     let s = load_json("pbad", &json).unwrap();
     assert_eq!(names(&s), ["Keep1", "Keep2"]);
     assert_eq!(s.active_preset.as_deref(), Some("user:Keep2"));
+    // Twelve entries in, two kept: every dropped preset now counts (D-06).
+    assert_eq!(s.load_repairs, 10);
 }
 
 #[test]
 fn presets_wrong_shape_never_corrupts_the_file() {
-    for extra in [r#""presets":"nope""#, r#""presets":{"a":1}"#, r#""presets":null"#, r#""active_preset":5"#] {
+    // A `presets` that is not an array counts once; a wrong-typed active_preset just means none.
+    for (extra, repairs) in [
+        (r#""presets":"nope""#, 1),
+        (r#""presets":{"a":1}"#, 1),
+        (r#""presets":null"#, 1),
+        (r#""active_preset":5"#, 0),
+    ] {
         let json = format!(r#"{{"version":1,"preamp_db":-2.0,{extra}}}"#);
         let s = load_json("pshape", &json).unwrap();
-        assert!(s.presets.is_empty());
+        assert!(s.presets.is_empty() && s.active_preset.is_none());
         assert_eq!(s.preamp_db, -2.0);
+        assert_eq!(s.load_repairs, repairs, "{extra}");
     }
 }
 
@@ -439,4 +474,227 @@ fn presets_hundred_worst_case_fit_under_half_the_file_cap() {
     cleanup(&p);
     assert_eq!(back.presets.len(), 100);
     assert!(state_eq(&s, &back));
+}
+
+// ---- Phase 10: a damaged entry costs only itself ----
+
+fn base_json() -> serde_json::Value {
+    serde_json::json!({
+        "version": 1, "mode": "Parametric", "preamp_db": -2.0, "bass_db": 3.0, "treble_db": -4.0,
+        "balance": 0.5, "limiter_enabled": false, "bypass": true, "frame_duration_ms": 120.0,
+    })
+}
+
+fn parse_value(v: &serde_json::Value) -> Result<Inner, EqError> {
+    persist::parse(&serde_json::to_vec(v).unwrap())
+}
+
+fn band_json(freq: f64) -> serde_json::Value {
+    serde_json::json!({"kind": "Peak", "freq": freq, "gain_db": 1.0, "q": 1.0, "enabled": true})
+}
+
+fn with_bands(bands: Vec<serde_json::Value>) -> serde_json::Value {
+    let mut v = base_json();
+    v["parametric"] = serde_json::json!({ "bands": bands });
+    v
+}
+
+fn freqs(s: &Inner) -> Vec<f32> {
+    s.parametric.iter().map(|b| b.freq).collect()
+}
+
+#[test]
+fn envelope_stays_strict() {
+    for j in [
+        "[]", "42", r#""x""#, "null", "{}", "true",
+        r#"{"version":0}"#, r#"{"version":-1}"#, r#"{"version":"1"}"#, r#"{"version":1.5}"#,
+        r#"{"version":null}"#, r#"{"mode":"Parametric","preamp_db":-2.0}"#,
+    ] {
+        assert_eq!(persist::parse(j.as_bytes()).err(), Some(EqError::Corrupt), "{j}");
+    }
+    for (j, n) in [(r#"{"version":2}"#, 2), (r#"{"version":99,"mode":5}"#, 99), (r#"{"version":7,"presets":"x"}"#, 7)] {
+        assert_eq!(persist::parse(j.as_bytes()).err(), Some(EqError::UnsupportedVersion(n)), "{j}");
+    }
+    for bytes in [&b"not json at all \x00\xff"[..], &b"{\"version\":1,"[..], &b""[..]] {
+        assert_eq!(persist::parse(bytes).err(), Some(EqError::Corrupt));
+    }
+}
+
+#[test]
+fn absent_fields_are_an_older_file_not_damage() {
+    let heavy_json = serde_json::to_vec(&PersistedState::from_inner(&heavy())).unwrap();
+    for (tag, bytes) in [
+        ("version only", br#"{"version":1}"#.to_vec()),
+        ("v0.1", V01_FIXTURE.as_bytes().to_vec()),
+        ("round trip", heavy_json),
+        ("parametric without bands", br#"{"version":1,"parametric":{}}"#.to_vec()),
+        ("saved null active preset", br#"{"version":1,"active_preset":null}"#.to_vec()),
+    ] {
+        let s = persist::parse(&bytes).unwrap();
+        assert_eq!(s.load_repairs, 0, "{tag}");
+    }
+    let s = persist::parse(br#"{"version":1,"parametric":{}}"#).unwrap();
+    assert_eq!(s.parametric, Inner::default().parametric);
+    // A save of a real state never reports repairs, whatever it holds.
+    let p = tmp_path("norepairs");
+    persist::save(&p, &heavy()).unwrap();
+    assert_eq!(persist::load(&p).unwrap().load_repairs, 0);
+    cleanup(&p);
+}
+
+#[test]
+fn a_wrong_scalar_falls_back_to_its_default_and_changes_nothing_else() {
+    let d = Inner::default();
+    let numeric = [("preamp_db", -2.0f32), ("bass_db", 3.0), ("treble_db", -4.0), ("balance", 0.5), ("frame_duration_ms", 120.0)];
+    let mut cases: Vec<(&str, serde_json::Value)> = Vec::new();
+    for key in ["mode", "preamp_db", "bass_db", "treble_db", "balance", "limiter_enabled", "bypass", "frame_duration_ms"] {
+        for bad in [serde_json::json!(null), serde_json::json!("x"), serde_json::json!([]), serde_json::json!({}), serde_json::json!(true), serde_json::json!(1)] {
+            let is_bool = key == "limiter_enabled" || key == "bypass";
+            let is_num = numeric.iter().any(|(k, _)| *k == key);
+            // A bool is a bool for a bool field, a plain number is fine for a numeric field.
+            if (is_bool && bad == serde_json::json!(true)) || (is_num && bad == serde_json::json!(1)) {
+                continue;
+            }
+            cases.push((key, bad));
+        }
+    }
+    for (key, bad) in cases {
+        let mut v = base_json();
+        v[key] = bad.clone();
+        let s = persist::parse(&serde_json::to_vec(&v).unwrap()).unwrap();
+        assert_eq!(s.load_repairs, 1, "{key} = {bad}");
+        let want = |name: &str, fallback: f32, set: f32| if name == key { fallback } else { set };
+        assert_eq!(s.mode, if key == "mode" { d.mode } else { EqMode::Parametric }, "{key} = {bad}");
+        assert_eq!(s.preamp_db, want("preamp_db", d.preamp_db, -2.0), "{key} = {bad}");
+        assert_eq!(s.bass_db, want("bass_db", d.bass_db, 3.0), "{key} = {bad}");
+        assert_eq!(s.treble_db, want("treble_db", d.treble_db, -4.0), "{key} = {bad}");
+        assert_eq!(s.balance, want("balance", d.balance, 0.5), "{key} = {bad}");
+        assert_eq!(s.frame_duration_ms, want("frame_duration_ms", d.frame_duration_ms, 120.0), "{key} = {bad}");
+        assert_eq!(s.limiter_enabled, if key == "limiter_enabled" { d.limiter_enabled } else { false }, "{key} = {bad}");
+        assert_eq!(s.bypass, if key == "bypass" { d.bypass } else { true }, "{key} = {bad}");
+        assert_eq!(s.parametric, d.parametric, "{key} = {bad}");
+        assert_eq!(s.graphic, d.graphic, "{key} = {bad}");
+    }
+}
+
+#[test]
+fn clamped_values_do_not_count_as_damage() {
+    let json = r#"{"version":1,"preamp_db":500.0,"bass_db":99,"balance":-5,"frame_duration_ms":9999.0,
+        "graphic":{"band_count":5,"gains_db":[99,-99,0,0,0]},
+        "parametric":{"bands":[{"kind":"Peak","freq":1e9,"gain_db":500.0,"q":1e9,"enabled":true}]}}"#;
+    let s = persist::parse(json.as_bytes()).unwrap();
+    assert_eq!((s.preamp_db, s.bass_db, s.balance, s.frame_duration_ms), (24.0, 12.0, -1.0, 85.3));
+    assert_eq!(s.load_repairs, 0);
+    let s = persist::parse(br#"{"version":1,"frame_duration_ms":0.5}"#).unwrap();
+    assert_eq!((s.frame_duration_ms, s.load_repairs), (85.3, 0));
+}
+
+#[test]
+fn a_damaged_band_drops_only_that_band() {
+    let good = |f: f64| band_json(f);
+    let mut missing = good(300.0);
+    missing.as_object_mut().unwrap().remove("q");
+    let mut wrong_kind = good(400.0);
+    wrong_kind["kind"] = serde_json::json!("Wat");
+    let mut wrong_enabled = good(500.0);
+    wrong_enabled["enabled"] = serde_json::json!("yes");
+    let mut text_freq = good(600.0);
+    text_freq["freq"] = serde_json::json!("1k");
+    let mut too_big = good(700.0);
+    too_big["gain_db"] = serde_json::json!(1e39);
+    let v = with_bands(vec![
+        good(100.0), missing, good(200.0), wrong_kind, serde_json::json!("junk"), wrong_enabled,
+        text_freq, serde_json::json!(null), too_big, serde_json::json!([]), good(800.0),
+    ]);
+    let s = parse_value(&v).unwrap();
+    assert_eq!(freqs(&s), [100.0, 200.0, 800.0]);
+    assert_eq!(s.load_repairs, 8);
+    // Nothing outside the band list changed.
+    assert_eq!((s.mode, s.preamp_db, s.bass_db, s.bypass), (EqMode::Parametric, -2.0, 3.0, true));
+}
+
+#[test]
+fn bands_past_the_sixteenth_are_cut_and_each_cut_band_counts() {
+    let v = with_bands((0..20).map(|i| band_json(100.0 + i as f64)).collect());
+    let s = parse_value(&v).unwrap();
+    assert_eq!(s.parametric.len(), 16);
+    assert_eq!(s.parametric[15].freq, 115.0);
+    assert_eq!(s.load_repairs, 4);
+    // Damaged bands are filtered first, so the cut only takes what is still over the limit.
+    let mut bands: Vec<serde_json::Value> = (0..18).map(|i| band_json(100.0 + i as f64)).collect();
+    bands.insert(3, serde_json::json!("junk"));
+    bands.insert(9, serde_json::json!(7));
+    let s = parse_value(&with_bands(bands)).unwrap();
+    assert_eq!(s.parametric.len(), 16);
+    assert_eq!(s.parametric[3].freq, 103.0);
+    assert_eq!(s.load_repairs, 4);
+}
+
+#[test]
+fn a_parametric_entry_of_the_wrong_shape_gives_the_default_bands() {
+    let d = Inner::default();
+    for bad in [
+        serde_json::json!(5), serde_json::json!("x"), serde_json::json!(null), serde_json::json!([]),
+        serde_json::json!({"bands": 5}), serde_json::json!({"bands": null}), serde_json::json!({"bands": {}}),
+    ] {
+        let mut v = base_json();
+        v["parametric"] = bad.clone();
+        let s = parse_value(&v).unwrap();
+        assert_eq!(s.parametric, d.parametric, "{bad}");
+        assert_eq!(s.load_repairs, 1, "{bad}");
+        assert_eq!(s.preamp_db, -2.0, "{bad}");
+    }
+    let mut v = base_json();
+    v["parametric"] = serde_json::json!({});
+    let s = parse_value(&v).unwrap();
+    assert_eq!((s.parametric, s.load_repairs), (d.parametric, 0));
+}
+
+#[test]
+fn every_wrong_value_at_every_known_key_still_loads() {
+    // T-10-04: inside a valid envelope no single wrong value may make parse fail or panic.
+    let wrong = [
+        serde_json::json!(null), serde_json::json!("x"), serde_json::json!(true), serde_json::json!(7),
+        serde_json::json!(-1.5), serde_json::json!([]), serde_json::json!({}), serde_json::json!([null]),
+        serde_json::json!({"bands": [1, 2]}), serde_json::json!(1e39),
+    ];
+    let keys = [
+        "mode", "parametric", "graphic", "preamp_db", "bass_db", "treble_db", "balance",
+        "limiter_enabled", "bypass", "frame_duration_ms", "presets", "active_preset",
+    ];
+    for key in keys {
+        for bad in &wrong {
+            let mut v = base_json();
+            v[key] = bad.clone();
+            let s = parse_value(&v).unwrap_or_else(|e| panic!("{key} = {bad}: {e:?}"));
+            assert!(s.engine_params(48000, 85.3).is_ok(), "{key} = {bad}");
+        }
+    }
+}
+
+#[test]
+fn repairs_are_not_persisted_and_a_dropped_band_stays_dropped() {
+    let v = with_bands(vec![band_json(100.0), serde_json::json!("junk"), band_json(200.0)]);
+    let s = parse_value(&v).unwrap();
+    assert_eq!(s.load_repairs, 1);
+    let p = tmp_path("repaired");
+    persist::save(&p, &s).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    assert!(saved.get("load_repairs").is_none(), "the count is never written");
+    let again = persist::load(&p).unwrap();
+    cleanup(&p);
+    assert_eq!((again.load_repairs, freqs(&again)), (0, vec![100.0, 200.0]));
+}
+
+#[test]
+fn presets_that_sanitize_drops_and_surplus_presets_count() {
+    let long = "x".repeat(41);
+    let list = [preset_json("Keep", ""), preset_json("", ""), preset_json(&long, ""), preset_json("keep", "")];
+    let json = format!(r#"{{"version":1,"presets":[{}]}}"#, list.join(","));
+    let s = load_json("pcount", &json).unwrap();
+    assert_eq!((names(&s), s.load_repairs), (vec!["Keep".to_string()], 3));
+    let many: Vec<String> = (0..130).map(|i| preset_json(&format!("p{i}"), "")).collect();
+    let json = format!(r#"{{"version":1,"presets":[{}]}}"#, many.join(","));
+    let s = load_json("pcut", &json).unwrap();
+    assert_eq!((s.presets.len(), s.load_repairs), (100, 30));
 }
