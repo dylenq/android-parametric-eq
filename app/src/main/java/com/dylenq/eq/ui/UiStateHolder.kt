@@ -1,7 +1,9 @@
 package com.dylenq.eq.ui
 
 import android.media.AudioManager
+import android.content.ContentResolver
 import android.media.AudioTrack
+import android.net.Uri
 import com.dylenq.eq.EqRuntime
 import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.EqException
@@ -19,6 +21,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
@@ -631,6 +634,53 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
         emit("Applied $name", undoable = recorded)
     }
 
+    /**
+     * Imports the AutoEq file at [uri] as a new user preset and applies it as one undo step ("Imported <name>,
+     * N filters", plus skipped and clamped counts; Undo only when the core recorded a step). The read runs off
+     * the main thread. Any failure (too large, not an EQ file, full list, unreadable) says so and changes
+     * nothing: presets, live sound and undo history stay as they were. Inert while a gesture is open.
+     */
+    suspend fun importEqUri(resolver: ContentResolver, uri: Uri): PresetResult {
+        val file = try {
+            EqFileIo.read(resolver, uri)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val text = ImportExportCopy.importErrorText(e)
+            synchronized(lock) { emit(text) }
+            return PresetResult.Rejected(text)
+        }
+        val r = presetOp {
+            if (gestureDepth > 0) return@presetOp PresetResult.Rejected("Couldn't apply that change.")
+            val report = controller.importEqText(file.name, file.text, controller.snapshot().graphicBandCount)
+            edited()
+            val recorded = controller.edit { it.applyPreset(report.key) }
+            _ui.update { it.copy(selectedBand = null, lastTouchedBand = null) }
+            republishLocked(freshIds = true)
+            emit(ImportExportCopy.importedMessage(report), undoable = recorded)
+            PresetResult.Ok
+        }
+        if (r is PresetResult.Rejected) synchronized(lock) { emit(r.message) }
+        return r
+    }
+
+    /** Writes the live bands as ParametricEQ.txt text to [uri]; "Exported <preset or EQ>" or a failure message. */
+    suspend fun exportEqUri(resolver: ContentResolver, uri: Uri): PresetResult {
+        val result = try {
+            val text = synchronized(lock) { controller.exportParametricText() }
+            EqFileIo.write(resolver, uri, text)
+            PresetResult.Ok
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            PresetResult.Rejected(ImportExportCopy.EXPORT_FAILED)
+        }
+        synchronized(lock) {
+            emit(if (result is PresetResult.Rejected) result.message else "Exported ${_ui.value.activePresetName ?: "EQ"}")
+        }
+        return result
+    }
+
     private fun existingPresetNames(): List<String> = controller.snapshot().presets.map { it.name }
 
     /** Maps a preset core error to UI copy, or null when it is not one of the preset errors. */
@@ -640,6 +690,7 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
         is EqException.NotFound -> PresetNames.GONE
         is EqException.ReadOnly -> PresetNames.READ_ONLY
         is EqException.TooManyPresets -> PresetNames.TOO_MANY
+        is EqException.NotAnEqFile, is EqException.FileTooLarge -> ImportExportCopy.importErrorText(e)
         else -> null
     }
 
