@@ -2,7 +2,9 @@
 
 use std::io::{Read, Write};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::error::EqError;
 use crate::inner::{DEFAULT_FRAME_MS, Inner, MAX_FRAME_MS, MIN_FRAME_MS, TONE_MAX_DB};
@@ -104,7 +106,12 @@ impl PersistedState {
 }
 
 /// Clamps and validates a parsed state. Anything that cannot be repaired is `Corrupt`.
-pub fn sanitize(mut p: PersistedState) -> Result<PersistedState, EqError> {
+pub fn sanitize(p: PersistedState) -> Result<PersistedState, EqError> {
+    sanitize_counted(p).map(|(p, _)| p)
+}
+
+/// [`sanitize`], also returning how many user presets it removed.
+fn sanitize_counted(mut p: PersistedState) -> Result<(PersistedState, u32), EqError> {
     p.parametric.bands.truncate(MAX_BANDS);
     for b in &mut p.parametric.bands {
         if !(b.freq.is_finite() && b.gain_db.is_finite() && b.q.is_finite()) {
@@ -142,7 +149,9 @@ pub fn sanitize(mut p: PersistedState) -> Result<PersistedState, EqError> {
         p.frame_duration_ms = DEFAULT_FRAME_MS;
     }
     // Preset damage never fails the load: bad presets are dropped one by one.
+    let before = p.presets.len();
     p.presets = presets::sanitize_user_presets(std::mem::take(&mut p.presets));
+    let removed = u32::try_from(before - p.presets.len()).unwrap_or(u32::MAX);
     let resolves = p
         .active_preset
         .as_deref()
@@ -150,13 +159,125 @@ pub fn sanitize(mut p: PersistedState) -> Result<PersistedState, EqError> {
     if !resolves {
         p.active_preset = None;
     }
-    Ok(p)
+    Ok((p, removed))
+}
+
+fn count(repairs: &mut u32) {
+    *repairs = repairs.saturating_add(1);
+}
+
+/// Reads one entry on its own. Absent is an older file: the default, not counted. Present but
+/// of the wrong type: the default, counted.
+fn read_or<T: DeserializeOwned>(raw: Option<Value>, default: T, repairs: &mut u32) -> T {
+    match raw {
+        None => default,
+        Some(v) => serde_json::from_value(v).unwrap_or_else(|_| {
+            count(repairs);
+            default
+        }),
+    }
+}
+
+/// [`read_or`] for a number that must also be finite (a value too large for an f32 is not).
+fn read_f32(raw: Option<Value>, default: f32, repairs: &mut u32) -> f32 {
+    match raw {
+        None => default,
+        Some(v) => match serde_json::from_value::<f32>(v) {
+            Ok(x) if x.is_finite() => x,
+            _ => {
+                count(repairs);
+                default
+            }
+        },
+    }
+}
+
+/// Bands one at a time: a damaged band is dropped and counted, bands past the limit are cut and
+/// counted. A missing `parametric` or `bands` entry is the default list; one of the wrong shape
+/// is the default list and counted.
+fn read_bands(raw: Option<Value>, repairs: &mut u32) -> Vec<Band> {
+    let items = match raw {
+        None => return default_bands(),
+        Some(Value::Object(mut o)) => match o.remove("bands") {
+            None => return default_bands(),
+            Some(Value::Array(items)) => items,
+            Some(_) => {
+                count(repairs);
+                return default_bands();
+            }
+        },
+        Some(_) => {
+            count(repairs);
+            return default_bands();
+        }
+    };
+    let mut bands: Vec<Band> = items
+        .into_iter()
+        .filter_map(|v| match serde_json::from_value::<Band>(v) {
+            Ok(b) if b.freq.is_finite() && b.gain_db.is_finite() && b.q.is_finite() => Some(b),
+            _ => {
+                count(repairs);
+                None
+            }
+        })
+        .collect();
+    let cut = u32::try_from(bands.len().saturating_sub(MAX_BANDS)).unwrap_or(u32::MAX);
+    *repairs = repairs.saturating_add(cut);
+    bands.truncate(MAX_BANDS);
+    bands
+}
+
+/// The graphic block is one unit: it must read, have a supported count, one gain per band and
+/// only finite numbers, otherwise it is the default graphic state.
+fn read_graphic(raw: Option<Value>, repairs: &mut u32) -> GraphicState {
+    let Some(v) = raw else { return GraphicState::default() };
+    match serde_json::from_value::<GraphicState>(v) {
+        Ok(g)
+            if GRAPHIC_COUNTS.contains(&g.band_count)
+                && g.gains_db.len() == g.band_count as usize
+                && g.gains_db.iter().all(|x| x.is_finite()) =>
+        {
+            g
+        }
+        _ => {
+            count(repairs);
+            GraphicState::default()
+        }
+    }
+}
+
+/// Presets one at a time: one that does not read is dropped and counted. A `presets` entry that
+/// is not a list is no presets, counted.
+fn read_presets(raw: Option<Value>, repairs: &mut u32) -> Vec<Preset> {
+    match raw {
+        None => Vec::new(),
+        Some(Value::Array(items)) => items
+            .into_iter()
+            .filter_map(|v| match serde_json::from_value::<Preset>(v) {
+                Ok(p) => Some(p),
+                Err(_) => {
+                    count(repairs);
+                    None
+                }
+            })
+            .collect(),
+        Some(_) => {
+            count(repairs);
+            Vec::new()
+        }
+    }
 }
 
 /// Parses bytes (size is checked by the caller before this).
+///
+/// Only the envelope is strict: bytes that are not a JSON object, or a `version` that is missing,
+/// zero or not a whole number, are `Corrupt`, and a newer version is `UnsupportedVersion`. Every
+/// other entry is read on its own, so a damaged one costs only itself; `load_repairs` on the
+/// result says how many were dropped or reset to their default.
 pub fn parse(bytes: &[u8]) -> Result<Inner, EqError> {
-    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| EqError::Corrupt)?;
-    let version = value
+    let value: Value = serde_json::from_slice(bytes).map_err(|_| EqError::Corrupt)?;
+    let Value::Object(mut o) = value else { return Err(EqError::Corrupt) };
+    let version = o
         .get("version")
         .and_then(|v| v.as_u64())
         .ok_or(EqError::Corrupt)?;
@@ -166,41 +287,33 @@ pub fn parse(bytes: &[u8]) -> Result<Inner, EqError> {
     if version == 0 {
         return Err(EqError::Corrupt);
     }
-    // Presets and bands are read apart from the rest so a damaged one costs only itself, never the file.
-    let mut value = value;
-    let (raw_presets, raw_active) = match value.as_object_mut() {
-        Some(o) => (o.remove("presets"), o.remove("active_preset")),
-        None => (None, None),
-    };
-    let raw_bands = value
-        .get_mut("parametric")
-        .and_then(|p| p.as_object_mut())
-        .filter(|p| p.get("bands").is_some_and(|b| b.is_array()))
-        .and_then(|p| p.remove("bands"));
+    let d = Inner::default();
     let mut repairs: u32 = 0;
-    let mut state: PersistedState = serde_json::from_value(value).map_err(|_| EqError::Corrupt)?;
-    if let Some(serde_json::Value::Array(items)) = raw_bands {
-        state.parametric.bands = items
-            .into_iter()
-            .filter_map(|v| match serde_json::from_value::<Band>(v) {
-                Ok(b) if b.freq.is_finite() && b.gain_db.is_finite() && b.q.is_finite() => Some(b),
-                _ => {
-                    repairs = repairs.saturating_add(1);
-                    None
-                }
-            })
-            .collect();
-    }
-    state.presets = match raw_presets {
-        Some(serde_json::Value::Array(items)) => items
-            .into_iter()
-            .filter_map(|v| serde_json::from_value::<Preset>(v).ok())
-            .collect(),
-        _ => Vec::new(),
+    let r = &mut repairs;
+    let state = PersistedState {
+        version: u32::try_from(version).unwrap_or(SCHEMA_VERSION),
+        mode: read_or(o.remove("mode"), d.mode, r),
+        parametric: PersistedParametric { bands: read_bands(o.remove("parametric"), r) },
+        graphic: read_graphic(o.remove("graphic"), r),
+        preamp_db: read_f32(o.remove("preamp_db"), d.preamp_db, r),
+        bass_db: read_f32(o.remove("bass_db"), d.bass_db, r),
+        treble_db: read_f32(o.remove("treble_db"), d.treble_db, r),
+        balance: read_f32(o.remove("balance"), d.balance, r),
+        limiter_enabled: read_or(o.remove("limiter_enabled"), d.limiter_enabled, r),
+        bypass: read_or(o.remove("bypass"), d.bypass, r),
+        frame_duration_ms: read_f32(o.remove("frame_duration_ms"), d.frame_duration_ms, r),
+        presets: read_presets(o.remove("presets"), r),
+        // A wrong type or a null (what "no active preset" is saved as) just means none.
+        active_preset: match o.remove("active_preset") {
+            Some(Value::String(key)) => Some(key),
+            _ => None,
+        },
     };
-    state.active_preset = raw_active.and_then(|v| v.as_str().map(String::from));
-    let mut inner = sanitize(state)?.into_inner();
-    inner.load_repairs = repairs;
+    // Every value above is typed and finite; this clamps the ranges and drops unusable presets.
+    // It cannot fail on such input, and if it ever did the file is Corrupt rather than a panic.
+    let (state, removed) = sanitize_counted(state)?;
+    let mut inner = state.into_inner();
+    inner.load_repairs = repairs.saturating_add(removed);
     Ok(inner)
 }
 
