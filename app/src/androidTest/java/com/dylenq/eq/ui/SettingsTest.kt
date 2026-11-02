@@ -134,9 +134,10 @@ class SettingsTest {
     @Test fun aSessionRowShowsPackageSessionIdAndStateWithNoLink() {
         rule.launch(); compose.waitForIdle(); openSettings()
         rule.runtime.post(SessionIntent.Event.Open(1234, "com.example.player"))
-        compose.waitUntil(5000) { exists("session-row-1234") }
-        compose.onNodeWithTag("session-row-1234").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("com.example.player").assertExists()
+        compose.waitUntil(5000) { rule.runtime.status.value.sessions.any { it.id == 1234 } }
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("session-row-1234"))
+        compose.onNodeWithTag("session-row-1234").assertIsDisplayed()
+        compose.onNode(hasText("com.example.player") and androidx.compose.ui.test.hasAnyAncestor(hasTestTag("session-row-1234"))).assertExists()
         compose.onNodeWithText("Session 1234 · Equalizing").assertExists()
         compose.onNodeWithTag("sessions-count").assertExists()
         compose.onNodeWithText("1 session").assertExists()
@@ -188,14 +189,16 @@ class SettingsTest {
         rule.runtime.markDirty() // the worker's next publish carries the new count, as after a real probe
         rule.launch(); compose.waitForIdle()
         openSettings()
-        compose.onNodeWithTag("engine-bands").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("engine-bands"))
+        compose.onNodeWithTag("engine-bands").assertIsDisplayed()
         assertTrue(existsText("Engine bands: 512 (measured)"))
     }
 
     @Test fun engineBandsLineWithoutMeasurementSaysNotMeasured() {
         rule.launch(); compose.waitForIdle()
         openSettings()
-        compose.onNodeWithTag("engine-bands").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("engine-bands"))
+        compose.onNodeWithTag("engine-bands").assertIsDisplayed()
         assertTrue(existsText("Engine bands: not measured yet"))
     }
 }

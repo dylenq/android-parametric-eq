@@ -51,8 +51,9 @@ The screenshots come from an Android 17 arm64 emulator. `spike-tools/readme-scre
 - An optional "Start when the phone turns on" setting (off by default).
 - Light and dark themes, and Material You dynamic colour on Android 12 or later.
 - A Settings screen that lists the audio sessions it has detected.
+- Per-app control. The Apps section in Settings lists the apps EQ has seen. Turn EQ off for an app, or give it a preset of its own so it does not follow the live EQ. Global mode ignores these settings.
 
-Per-device or per-app EQs, and AutoEq or ParametricEQ.txt import and export, are not in this version.
+Per-device EQs, and AutoEq or ParametricEQ.txt import and export, are not in this version.
 
 ## Install
 

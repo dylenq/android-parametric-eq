@@ -4,6 +4,10 @@ All notable changes are listed here, in the style of Keep a Changelog.
 
 ## Unreleased
 
+### Added
+
+- Per-app control in Settings. The new Apps section lists the apps EQ has seen. Each one has a switch to turn EQ off for that app and a picker to give it its own preset instead of the live EQ. Global mode ignores these settings.
+
 ### Fixed
 
 - A damaged entry in the saved settings now costs only that entry instead of the whole file. The app says so, and a copy of the original file is kept.

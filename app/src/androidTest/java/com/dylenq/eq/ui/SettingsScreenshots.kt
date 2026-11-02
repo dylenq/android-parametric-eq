@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.platform.app.InstrumentationRegistry
 import com.dylenq.eq.EqApp
 import com.dylenq.eq.service.SessionIntent
@@ -37,7 +38,8 @@ class SettingsScreenshots {
         shot("05-11-settings-default")
         rule.runtime.post(SessionIntent.Event.Open(4521, "com.example.player"))
         rule.runtime.post(SessionIntent.Event.Open(4522, "org.example.browser"))
-        compose.waitUntil(5000) { compose.onAllNodes(hasTestTag("session-row-4522")).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(5000) { rule.runtime.status.value.sessions.any { it.id == 4522 } }
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("session-row-4522"))
         Thread.sleep(600)
         shot("05-11-settings-with-session")
         compose.onNodeWithTag("global-mode").performClick()
