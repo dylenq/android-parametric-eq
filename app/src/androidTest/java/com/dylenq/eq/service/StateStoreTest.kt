@@ -8,6 +8,7 @@ import com.dylenq.eq.core.EqCore
 import com.dylenq.eq.core.EqMode
 import com.dylenq.eq.core.FilterKind
 import java.io.File
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -18,6 +19,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.json.JSONObject
 
 @RunWith(AndroidJUnit4::class)
 class StateStoreTest {
@@ -154,6 +156,131 @@ class StateStoreTest {
         val texts = left.map { it.readText() }.sorted()
         assertEquals(listOf("garbage 3", "garbage 4", "garbage 5"), texts)
         kept.clear()
+    }
+
+    /**
+     * Saves a real core (Parametric, tone, a user preset, the default seven bands) and then replaces the
+     * second band's frequency with text, so exactly one entry of the file is damaged. Returns the core.
+     */
+    private fun writeStateWithOneBadBand(store: StateStore): EqCore {
+        val c = EqCore()
+        c.setMode(EqMode.PARAMETRIC)
+        c.setBand(0u, Band(FilterKind.PEAK, 1234f, 4.5f, 2f, true))
+        c.setPreamp(-3f)
+        c.setBass(2f)
+        c.savePreset("Mine")
+        store.save(c)
+        val json = JSONObject(store.file.readText())
+        json.getJSONObject("parametric").getJSONArray("bands").getJSONObject(1).put("freq", "loud")
+        store.file.writeText(json.toString(2))
+        return c
+    }
+
+    private fun bandCountOnDisk(f: File): Int =
+        JSONObject(f.readText()).getJSONObject("parametric").getJSONArray("bands").length()
+
+    @Test
+    fun one_bad_band_opens_with_everything_else_a_notice_and_a_byte_equal_copy() {
+        val store = StateStore(dir)
+        val source = writeStateWithOneBadBand(store)
+        val original = store.file.readBytes()
+        val (core, notice) = store.open()
+        assertEquals(StoreNotice.Repaired(1u, true), notice)
+
+        val want = source.snapshot()
+        val got = core.snapshot()
+        assertEquals(want.bands.filterIndexed { i, _ -> i != 1 }, got.bands)
+        assertEquals(EqMode.PARAMETRIC, got.mode)
+        assertEquals(-3f, got.preampDb, 0f)
+        assertEquals(2f, got.bassDb, 0f)
+        assertEquals("user:Mine", got.activePresetKey)
+        assertTrue(got.presets.any { it.key == "user:Mine" })
+
+        val bak = baks().single()
+        assertTrue(bak.name, bak.name.startsWith("eq-state.json.repaired-"))
+        assertArrayEquals(original, bak.readBytes())
+        assertArrayEquals("the live file stays in place, unchanged", original, store.file.readBytes())
+    }
+
+    @Test
+    fun the_repaired_copy_survives_the_first_save() {
+        val store = StateStore(dir)
+        val source = writeStateWithOneBadBand(store)
+        val original = store.file.readBytes()
+        val (core, _) = store.open()
+        store.save(core)
+        assertEquals(source.snapshot().bands.size - 1, bandCountOnDisk(store.file))
+        assertFalse(store.file.readText().contains("loud"))
+        assertArrayEquals(original, baks().single().readBytes())
+        val (again, notice) = store.open()
+        assertNull("a repaired file that was saved opens clean", notice)
+        assertEquals(core.snapshot().bands, again.snapshot().bands)
+    }
+
+    @Test
+    fun a_failed_copy_still_loads_says_so_and_leaves_no_partial_backup() {
+        val store = StateStore(dir, copier = { _, to ->
+            to.writeText("half a copy")
+            throw IOException("no space left")
+        })
+        val source = writeStateWithOneBadBand(store)
+        val original = store.file.readBytes()
+        val (core, notice) = store.open()
+        assertEquals(StoreNotice.Repaired(1u, false), notice)
+        assertEquals(source.snapshot().bands.size - 1, core.snapshot().bands.size)
+        assertTrue("no partial copy is left behind", baks().isEmpty())
+        assertArrayEquals(original, store.file.readBytes())
+    }
+
+    @Test
+    fun a_repaired_copy_shares_the_three_backup_limit() {
+        val store = StateStore(dir)
+        for (millis in listOf(1_000L, 2_000L, 3_000L)) File(dir, "eq-state.json.corrupt-$millis.bak").writeText("old $millis")
+        writeStateWithOneBadBand(store)
+        val original = store.file.readBytes()
+        store.open()
+        val left = baks().sortedBy { it.name.removeSuffix(".bak").substringAfterLast('-').toLong() }
+        assertEquals(3, left.size)
+        assertFalse("the oldest was pruned", left.any { it.name.contains("-1000.") })
+        assertTrue(left.last().name.startsWith("eq-state.json.repaired-"))
+        assertArrayEquals("the newest backup is the repaired copy", original, left.last().readBytes())
+    }
+
+    @Test
+    fun a_file_that_is_not_an_object_or_has_no_version_is_still_set_aside_whole() {
+        for (text in listOf("[]", "42", "{}", "{\"mode\":\"Graphic\"}", "{\"version\":0}", "{\"version\":\"1\"}")) {
+            dir.listFiles()?.forEach { it.deleteRecursively() }
+            val store = StateStore(dir)
+            store.file.writeText(text)
+            val (core, notice) = store.open()
+            assertEquals(text, StoreNotice.Damaged, notice)
+            assertTrue(text, baks().single().name.startsWith("eq-state.json.corrupt-"))
+            assertEquals(text, text, baks().single().readText())
+            assertFalse(text, store.file.exists())
+            assertEquals(text, EqCore().snapshot(), core.snapshot())
+        }
+        dir.listFiles()?.forEach { it.deleteRecursively() }
+        val store = StateStore(dir)
+        store.file.writeText("{\"version\":99,\"mode\":5}")
+        assertEquals(StoreNotice.NewerVersion(99u), store.open().second)
+        assertTrue(baks().single().name.startsWith("eq-state.json.v99-"))
+        assertFalse(store.file.exists())
+    }
+
+    @Test
+    fun a_runtime_over_a_repaired_file_publishes_the_repair_notice() {
+        writeStateWithOneBadBand(StateStore(dir))
+        val rt = EqRuntime(com.dylenq.eq.testsupport.FakeEffectFactory(), dir)
+        try {
+            assertEquals(
+                "Some saved settings were damaged and were removed. A backup was kept.",
+                rt.status.value.notice,
+            )
+            assertEquals(6, rt.controller.snapshot().bands.size)
+            assertEquals(1, baks().size)
+        } finally {
+            rt.shutdown()
+        }
     }
 
     @Test

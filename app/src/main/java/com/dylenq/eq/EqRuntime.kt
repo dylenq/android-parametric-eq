@@ -15,6 +15,7 @@ import com.dylenq.eq.service.ServiceStatus
 import com.dylenq.eq.service.SettingsStore
 import com.dylenq.eq.service.StateStore
 import com.dylenq.eq.service.StoreNotice
+import com.dylenq.eq.service.storeNoticeText
 import com.dylenq.eq.service.SessionIntent
 import com.dylenq.eq.service.usableSampleRate
 import java.io.File
@@ -122,11 +123,7 @@ class EqRuntime(
     // The persisted global mode is seeded the same way; the worker applies it before its first
     // publish, and a rejection then corrects the status through onGlobalRejected.
     private val _status = MutableStateFlow(
-        ServiceStatus(bypass = controller.snapshot().bypass, globalMode = settings.globalMode, engineMaxBands = measuredCap(), notice = when (opened.second) {
-            is StoreNotice.NewerVersion -> "Saved settings were made by a newer version and were set aside"
-            StoreNotice.Damaged -> "Saved settings were damaged and were set aside"
-            null -> null
-        })
+        ServiceStatus(bypass = controller.snapshot().bypass, globalMode = settings.globalMode, engineMaxBands = measuredCap(), notice = storeNoticeText(opened.second))
     )
     val status: StateFlow<ServiceStatus> = _status.asStateFlow()
 

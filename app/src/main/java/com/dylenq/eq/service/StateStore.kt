@@ -11,6 +11,25 @@ import java.nio.file.StandardCopyOption
 sealed interface StoreNotice {
     data class NewerVersion(val version: UInt) : StoreNotice
     data object Damaged : StoreNotice
+
+    /**
+     * The file loaded, but [count] saved entries were damaged and were dropped or reset to a default.
+     * [backedUp] says whether a copy of the original file was kept.
+     */
+    data class Repaired(val count: UInt, val backedUp: Boolean = true) : StoreNotice
+}
+
+/** The text the runtime shows for a notice from [StateStore.open]. */
+internal fun storeNoticeText(notice: StoreNotice?): String? = when (notice) {
+    is StoreNotice.NewerVersion -> "Saved settings were made by a newer version and were set aside"
+    StoreNotice.Damaged -> "Saved settings were damaged and were set aside"
+    is StoreNotice.Repaired ->
+        if (notice.backedUp) {
+            "Some saved settings were damaged and were removed. A backup was kept."
+        } else {
+            "Some saved settings were damaged and were removed."
+        }
+    null -> null
 }
 
 /**
@@ -18,32 +37,39 @@ sealed interface StoreNotice {
  * file is moved aside (timestamped `.bak`, newest [KEEP_BACKUPS] kept) and defaults are used. The
  * core's permissive default-on-error loader is never called, because the next save would overwrite
  * a file written by a newer version.
+ *
+ * A file that loads but had damaged entries (the core counts them) is copied to a `.repaired-` backup
+ * before anything can save over it; the live file stays where it is. [copier] makes that copy.
  */
 class StateStore(
     private val dir: File,
     private val saver: (EqCore, String) -> Unit = { core, path -> core.save(path) },
+    private val copier: (File, File) -> Unit = { from, to -> Files.copy(from.toPath(), to.toPath()) },
 ) {
     val file: File get() = File(dir, FILE_NAME)
 
     fun open(): Pair<EqCore, StoreNotice?> {
         val f = file
         if (!f.exists()) return EqCore() to null
-        return try {
-            EqCore.load(f.path) to null
+        val core = try {
+            EqCore.load(f.path)
         } catch (e: EqException.UnsupportedVersion) {
             backup(f, "v${e.v1}")
-            EqCore() to StoreNotice.NewerVersion(e.v1)
+            return EqCore() to StoreNotice.NewerVersion(e.v1)
         } catch (e: EqException.Corrupt) {
             backup(f, "corrupt")
-            EqCore() to StoreNotice.Damaged
+            return EqCore() to StoreNotice.Damaged
         } catch (e: EqException) {
             backup(f, "io")
-            EqCore() to StoreNotice.Damaged
+            return EqCore() to StoreNotice.Damaged
         } catch (e: Throwable) {
             Log.w(TAG, "unexpected load failure: ${e.javaClass.name}: ${e.message}")
             backup(f, "io")
-            EqCore() to StoreNotice.Damaged
+            return EqCore() to StoreNotice.Damaged
         }
+        val repairs = core.loadRepairs()
+        if (repairs == 0u) return core to null
+        return core to StoreNotice.Repaired(repairs, backupCopy(f, "repaired"))
     }
 
     /** Writes the live file atomically (tmp + rename inside the core). Throws on failure. */
@@ -52,12 +78,9 @@ class StateStore(
         saver(core, file.path)
     }
 
+    /** Moves [f] aside whole; the live file is gone afterwards. */
     private fun backup(f: File, tag: String) {
-        var millis = System.currentTimeMillis()
-        // Keep the suffix strictly increasing so "newest" is well defined within one millisecond.
-        val newest = backups().maxOfOrNull { suffix(it) } ?: 0L
-        if (millis <= newest) millis = newest + 1
-        val target = File(dir, "$FILE_NAME.$tag-$millis.bak")
+        val target = nextTarget(tag)
         try {
             Files.move(f.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
         } catch (t: Throwable) {
@@ -65,6 +88,29 @@ class StateStore(
             f.deleteRecursively()
         }
         prune()
+    }
+
+    /** Copies [f] aside and leaves it in place. Returns whether the copy exists; a failure is logged. */
+    private fun backupCopy(f: File, tag: String): Boolean {
+        val target = nextTarget(tag)
+        val copied = try {
+            copier(f, target)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "backup copy failed: ${t.javaClass.name}: ${t.message}")
+            target.deleteRecursively()
+            false
+        }
+        prune()
+        return copied
+    }
+
+    private fun nextTarget(tag: String): File {
+        var millis = System.currentTimeMillis()
+        // Keep the suffix strictly increasing so "newest" is well defined within one millisecond.
+        val newest = backups().maxOfOrNull { suffix(it) } ?: 0L
+        if (millis <= newest) millis = newest + 1
+        return File(dir, "$FILE_NAME.$tag-$millis.bak")
     }
 
     private fun backups(): List<File> =

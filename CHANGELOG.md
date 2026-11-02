@@ -6,6 +6,7 @@ All notable changes are listed here, in the style of Keep a Changelog.
 
 ### Fixed
 
+- A damaged entry in the saved settings now costs only that entry instead of the whole file. The app says so, and a copy of the original file is kept.
 - Deleting a band, or undoing a deletion, no longer leaves a filter-type menu open on the band that takes its place.
 - A band field's unsaved text could be written to the wrong band after the band above it was deleted.
 - The app no longer crashes when Android refuses to start the service in the background, or when the audio core fails to load. It shows an error screen in the second case.
