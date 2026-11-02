@@ -18,6 +18,16 @@ data class AppEntry(
     val lastSeen: Long = 0,
 )
 
+/** One output the phone has played through. [name] is the display name; [current] marks the one in use now. */
+data class DeviceEntry(
+    val key: String,
+    val name: String,
+    val presetKey: String?,
+    val current: Boolean,
+    /** The core's recency counter; larger is more recent. */
+    val lastSeen: Long = 0,
+)
+
 /** [tracked]: found by advanced player tracking instead of the app's own broadcast. */
 data class SessionInfo(val id: Int, val pkg: String, val state: SessionState, val tracked: Boolean = false)
 
@@ -36,4 +46,8 @@ data class ServiceStatus(
     val tracking: TrackingState = TrackingState.Off,
     /** Every per-app rule, in the core's order (sorting is the UI's job). */
     val apps: List<AppEntry> = emptyList(),
+    /** Every output device seen, in the core's order (sorting is the UI's job). */
+    val devices: List<DeviceEntry> = emptyList(),
+    /** True when the core could not be loaded; the Quick Settings tile then shows unavailable. */
+    val unavailable: Boolean = false,
 )

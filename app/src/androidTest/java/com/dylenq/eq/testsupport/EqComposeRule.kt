@@ -19,8 +19,11 @@ import org.junit.runners.model.Statement
  * Compose UI test rule: grants notifications, installs a fresh runtime ([RuntimeRule], outermost
  * among ours), and launches [MainActivity] on demand. Teardown closes the scenario and stops EqService.
  */
-class EqComposeRule(factoryProvider: () -> com.dylenq.eq.service.EffectFactory = { FakeEffectFactory() }) : TestRule {
-    val runtimeRule = RuntimeRule(factoryProvider)
+class EqComposeRule(
+    route: com.dylenq.eq.service.OutputRoute? = null,
+    factoryProvider: () -> com.dylenq.eq.service.EffectFactory = { FakeEffectFactory() },
+) : TestRule {
+    val runtimeRule = RuntimeRule(factoryProvider, route)
     val compose: ComposeTestRule = createEmptyComposeRule()
     private var scenario: ActivityScenario<MainActivity>? = null
 

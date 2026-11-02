@@ -62,6 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dylenq.eq.R
 import com.dylenq.eq.core.PresetInfo
 import com.dylenq.eq.service.AppEntry
+import com.dylenq.eq.service.DeviceEntry
 import com.dylenq.eq.service.SessionInfo
 import com.dylenq.eq.service.SessionState
 import com.dylenq.eq.service.TrackingState
@@ -117,6 +118,7 @@ fun SettingsScreen(
     }
     val sessions = remember(status.sessions) { SessionCopy.sorted(status.sessions) }
     val apps = remember(status.apps) { AppsCopy.sorted(status.apps) { labels.label(it) } }
+    val devices = remember(status.devices) { DevicesCopy.sorted(status.devices) }
     val engineBandsLine = status.engineMaxBands?.let { "Engine bands: $it (measured)" } ?: "Engine bands: not measured yet"
     val aboutLine = remember {
         val app = try {
@@ -210,6 +212,26 @@ fun SettingsScreen(
                             presetText = AppsCopy.presetText(app.presetKey, presetNames),
                             onEnabled = { on -> runtime.setAppEnabled(app.pkg, on) },
                             onPreset = { key -> runtime.setAppPreset(app.pkg, key) },
+                        )
+                    }
+                }
+                item(key = "h-devices") {
+                    SectionHeader(
+                        "Output devices",
+                        count = if (devices.isEmpty()) null else DevicesCopy.countText(devices.size),
+                        countTag = "devices-count",
+                    )
+                }
+                item(key = "devices-note") { DevicesNote() }
+                if (devices.isEmpty()) {
+                    item(key = "devices-empty") { DevicesEmptyBlock() }
+                } else {
+                    items(devices, key = { "d-${it.key}" }) { device ->
+                        DeviceRow(
+                            device = device,
+                            presets = ui.presets,
+                            presetText = DevicesCopy.presetText(device.presetKey, presetNames),
+                            onPreset = { key -> runtime.setDevicePreset(device.key, key) },
                         )
                     }
                 }
@@ -479,6 +501,75 @@ private fun AppRow(
                         text = { Text(p.name) },
                         onClick = { menuOpen = false; onPreset(p.key) },
                         modifier = Modifier.testTag("app-preset-${app.pkg}-${p.key}"),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DevicesNote() {
+    Text(
+        DevicesCopy.NOTE,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("devices-note"),
+    )
+}
+
+@Composable
+private fun DevicesEmptyBlock() {
+    Column(
+        Modifier.fillMaxWidth().heightIn(min = 96.dp).padding(horizontal = 16.dp, vertical = 12.dp).testTag("devices-empty"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Text(DevicesCopy.EMPTY_TITLE, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+        Text(
+            DevicesCopy.EMPTY_BODY,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
+/** The device name comes from remote hardware: plain text, never a link or action. */
+@Composable
+private fun DeviceRow(
+    device: DeviceEntry,
+    presets: List<PresetInfo>,
+    presetText: String,
+    onPreset: (String?) -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("device-row-${device.key}")) {
+        Text(device.name, style = MaterialTheme.typography.bodyLarge)
+        if (device.current) {
+            Text(
+                DevicesCopy.CURRENT,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.testTag("device-current-${device.key}"),
+            )
+        }
+        Box {
+            OutlinedButton(
+                onClick = { menuOpen = true },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("device-preset-${device.key}"),
+            ) { Text(presetText) }
+            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                DropdownMenuItem(
+                    text = { Text(DevicesCopy.NO_PRESET) },
+                    onClick = { menuOpen = false; onPreset(null) },
+                    modifier = Modifier.testTag("device-preset-${device.key}-none"),
+                )
+                presets.forEach { p ->
+                    DropdownMenuItem(
+                        text = { Text(p.name) },
+                        onClick = { menuOpen = false; onPreset(p.key) },
+                        modifier = Modifier.testTag("device-preset-${device.key}-${p.key}"),
                     )
                 }
             }

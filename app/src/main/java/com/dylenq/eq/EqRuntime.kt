@@ -14,6 +14,7 @@ import com.dylenq.eq.service.EngineProbe
 import com.dylenq.eq.service.OutputRoute
 import com.dylenq.eq.service.RealEngineProbe
 import com.dylenq.eq.service.AppEntry
+import com.dylenq.eq.service.DeviceEntry
 import com.dylenq.eq.service.EffectManager
 import com.dylenq.eq.service.RealEffectFactory
 import com.dylenq.eq.service.ServiceStatus
@@ -324,11 +325,15 @@ class EqRuntime(
         if (due != null && !closed) scope.launch { applyDevicePreset(due.first, due.second) }
     }
 
+    /** The route key last seen by [handleRoute]; null until the first route check. */
+    @Volatile private var currentDeviceKey: String? = null
+
     // Worker only.
     private fun handleRoute() {
         try {
             val info = route?.current()
             if (info != null) {
+                currentDeviceKey = info.key
                 val key = controller.recordDevice(info.key, info.name)
                 needsSave = true
                 restartSaveTimer()
@@ -342,6 +347,7 @@ class EqRuntime(
         } catch (t: Throwable) {
             Log.w("EQ-SVC", "route handling failed: ${t.javaClass.name}: ${t.message}")
         }
+        publishStatus()
         reapply()
     }
 
@@ -396,6 +402,20 @@ class EqRuntime(
             null
         } catch (t: Throwable) {
             Log.w("EQ-SVC", "set app preset failed: ${t.javaClass.name}: ${t.message}")
+            val text = "That preset no longer exists."
+            _status.update { it.copy(notice = text) }
+            text
+        }
+    }
+
+    /** Gives an output device a preset, or null to keep the current sound. Returns an error text, or null on success. */
+    fun setDevicePreset(key: String, presetKey: String?): String? {
+        if (closed) return null
+        return try {
+            controller.setDevicePreset(key, presetKey)
+            null
+        } catch (t: Throwable) {
+            Log.w("EQ-SVC", "set device preset failed: ${t.javaClass.name}: ${t.message}")
             val text = "That preset no longer exists."
             _status.update { it.copy(notice = text) }
             text
@@ -506,9 +526,14 @@ class EqRuntime(
                 val live = sessions.firstOrNull { s -> s.pkg == r.pkg }
                 AppEntry(r.pkg, r.enabled, r.presetKey, r.pkg, live != null, live?.state, r.lastSeen.toLong())
             }
+            val here = currentDeviceKey
+            val devices = controller.deviceRules().map { r ->
+                DeviceEntry(r.key, r.name, r.presetKey, r.key == here, r.lastSeen.toLong())
+            }
             _status.update {
                 it.copy(
                     sessionCount = count, bypass = bypass, globalMode = global, sessions = sessions, apps = apps,
+                    devices = devices,
                     engineMaxBands = measuredCap(),
                 )
             }

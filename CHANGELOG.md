@@ -7,6 +7,8 @@ All notable changes are listed here, in the style of Keep a Changelog.
 ### Added
 
 - Per-app control in Settings. The new Apps section lists the apps EQ has seen. Each one has a switch to turn EQ off for that app and a picker to give it its own preset instead of the live EQ. Global mode ignores these settings.
+- Device presets. The new Output devices section in Settings lists the speakers and headphones EQ has seen. Give a device a preset and it is applied to the live EQ when you switch to that device. A device with no preset keeps the current sound.
+- A Quick Settings tile that turns EQ on and off. It works even when the EQ service is not running.
 
 ### Fixed
 

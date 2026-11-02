@@ -52,6 +52,8 @@ The screenshots come from an Android 17 arm64 emulator. `spike-tools/readme-scre
 - Light and dark themes, and Material You dynamic colour on Android 12 or later.
 - A Settings screen that lists the audio sessions it has detected.
 - Per-app control. The Apps section in Settings lists the apps EQ has seen. Turn EQ off for an app, or give it a preset of its own so it does not follow the live EQ. Global mode ignores these settings.
+- Device presets. The Output devices section in Settings lists the outputs EQ has seen (phone speaker, wired headphones, Bluetooth, USB). Give one a preset and it is applied to the live EQ when you switch to that output; you can still edit it afterwards. A device with no preset keeps the current sound.
+- A Quick Settings tile. Add the EQ tile from the Quick Settings edit screen to turn EQ on or off with one tap.
 
 Per-device EQs, and AutoEq or ParametricEQ.txt import and export, are not in this version.
 

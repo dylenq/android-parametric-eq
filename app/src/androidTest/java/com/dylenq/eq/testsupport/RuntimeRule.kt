@@ -14,7 +14,10 @@ import org.junit.runners.model.Statement
  * Installs a fresh [EqRuntime] (fake factory by default, temp state dir) for each test and tears it
  * down afterwards. Tests share one process, so the previous runtime is always restored.
  */
-class RuntimeRule(private val factoryProvider: () -> EffectFactory = { FakeEffectFactory() }) : TestRule {
+class RuntimeRule(
+    private val factoryProvider: () -> EffectFactory = { FakeEffectFactory() },
+    private val route: com.dylenq.eq.service.OutputRoute? = null,
+) : TestRule {
     lateinit var runtime: EqRuntime
         private set
     lateinit var factory: EffectFactory
@@ -37,7 +40,7 @@ class RuntimeRule(private val factoryProvider: () -> EffectFactory = { FakeEffec
             factory = factoryProvider()
             prefsName = "eq_settings_test_${System.nanoTime()}"
             settings = SettingsStore(ctx, prefsName)
-            runtime = EqRuntime(factory, dir, settings)
+            runtime = EqRuntime(factory, dir, settings, route = route)
             app.installForTest(runtime)
             try {
                 base.evaluate()
