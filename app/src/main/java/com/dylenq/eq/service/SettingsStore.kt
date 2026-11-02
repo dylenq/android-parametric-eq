@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * The two service flags. Cheap to construct (no EqCore), so BootReceiver can read them. A null
+ * The service flags. Cheap to construct (no EqCore), so BootReceiver can read them. A null
  * [prefs] keeps the values in memory only (tests, runtimes without a Context). Setters use commit()
  * because these are rare edits that must survive an immediate process kill.
  */
@@ -23,6 +23,13 @@ class SettingsStore(private val prefs: SharedPreferences?) {
     var startOnBoot: Boolean
         get() = prefs?.getBoolean(KEY_BOOT, false) ?: memBoot
         set(v) { if (prefs != null) prefs.edit().putBoolean(KEY_BOOT, v).commit() else memBoot = v }
+
+    @Volatile private var memTracking = false
+
+    /** Advanced player tracking (Settings). Defaults to OFF. */
+    var playerTracking: Boolean
+        get() = prefs?.getBoolean(KEY_TRACKING, false) ?: memTracking
+        set(v) { if (prefs != null) prefs.edit().putBoolean(KEY_TRACKING, v).commit() else memTracking = v }
 
     @Volatile private var memEngineBands = -1
     @Volatile private var memEngineFp: String? = null
@@ -56,5 +63,6 @@ class SettingsStore(private val prefs: SharedPreferences?) {
         const val PREFS_NAME = "eq_settings"
         private const val KEY_GLOBAL = "global_mode"
         private const val KEY_BOOT = "start_on_boot"
+        private const val KEY_TRACKING = "player_tracking"
     }
 }

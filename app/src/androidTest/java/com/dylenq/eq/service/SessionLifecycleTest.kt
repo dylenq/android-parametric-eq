@@ -10,12 +10,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import com.dylenq.eq.MainActivity
+import com.dylenq.eq.EqRuntime
 import com.dylenq.eq.core.Band
 import com.dylenq.eq.core.EqMode
 import com.dylenq.eq.core.FilterKind
+import com.dylenq.eq.testsupport.FakeEffectFactory
 import com.dylenq.eq.testsupport.RuntimeRule
 import com.dylenq.eq.testsupport.ToneRig
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -138,6 +141,83 @@ class SessionLifecycleTest {
             assertEquals(0, runtime.status.value.sessionCount)
         } finally {
             scenario.close()
+        }
+    }
+
+    // ---- tracker commands, on a runtime with the recording fake ----
+
+    private fun withFakeRuntime(block: (EqRuntime, FakeEffectFactory) -> Unit) {
+        val fake = FakeEffectFactory()
+        val r = EqRuntime(fake)
+        try {
+            block(r, fake)
+        } finally {
+            r.shutdown()
+        }
+    }
+
+    private fun EqRuntime.attachedCount() = inspect { it.sessionCount() }
+
+    @Test
+    fun tracker_open_and_close_attach_and_release_through_the_queue() = withFakeRuntime { r, fake ->
+        r.postTracked(listOf(TrackedRow(41, "com.a.b")), emptyList())
+        assertTrue(poll(3000) { r.attachedCount() == 1 })
+        assertTrue(r.status.value.sessions.single().tracked)
+        val h = fake.handle(41)!!
+        r.postTracked(emptyList(), listOf(41))
+        assertTrue(poll(3000) { r.attachedCount() == 0 })
+        assertTrue(h.released)
+    }
+
+    @Test
+    fun tracker_close_does_not_release_an_announced_session() = withFakeRuntime { r, fake ->
+        r.post(SessionIntent.Event.Open(42, "com.a.b"))
+        assertTrue(poll(3000) { r.attachedCount() == 1 })
+        r.postTracked(listOf(TrackedRow(42, "com.a.b")), emptyList())
+        r.postTracked(emptyList(), listOf(42))
+        // The queue is in order: once this later close has run, the tracker close ahead of it has too.
+        r.post(SessionIntent.Event.Open(43, "com.c.d"))
+        assertTrue(poll(3000) { r.attachedCount() == 2 })
+        assertFalse(fake.handle(42)!!.released)
+        assertFalse(r.status.value.sessions.first { it.id == 42 }.tracked)
+    }
+
+    @Test
+    fun announced_sessions_work_in_every_tracking_state() = withFakeRuntime { r, fake ->
+        val states = listOf(
+            TrackingState.Off, TrackingState.NeedsPermission, TrackingState.NeedsReboot,
+            TrackingState.Unsupported("x"), TrackingState.Working(0),
+        )
+        for ((i, st) in states.withIndex()) {
+            val id = 50 + i
+            r.setTrackingState(st)
+            assertEquals(st, r.status.value.tracking)
+            r.post(SessionIntent.Event.Open(id, "com.a.b"))
+            assertTrue(poll(3000) { r.attachedCount() == 1 })
+            // publishStatus must keep the tracking field.
+            assertEquals(st, r.status.value.tracking)
+            val h = fake.handle(id)!!
+            r.post(SessionIntent.Event.Close(id, "com.a.b"))
+            assertTrue(poll(3000) { r.attachedCount() == 0 })
+            assertTrue(h.released)
+        }
+    }
+
+    @Test
+    fun status_and_settings_defaults() {
+        assertEquals(TrackingState.Off, ServiceStatus().tracking)
+        assertFalse(SettingsStore(null).playerTracking)
+        val mem = SettingsStore(null)
+        mem.playerTracking = true
+        assertTrue(mem.playerTracking)
+        val name = "eq_settings_test_tracking_${System.nanoTime()}"
+        try {
+            val a = SettingsStore(ctx, name)
+            assertFalse(a.playerTracking)
+            a.playerTracking = true
+            assertTrue(SettingsStore(ctx, name).playerTracking)
+        } finally {
+            ctx.deleteSharedPreferences(name)
         }
     }
 }

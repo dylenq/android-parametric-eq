@@ -17,6 +17,9 @@ import com.dylenq.eq.service.StateStore
 import com.dylenq.eq.service.StoreNotice
 import com.dylenq.eq.service.storeNoticeText
 import com.dylenq.eq.service.SessionIntent
+import com.dylenq.eq.service.SessionSource
+import com.dylenq.eq.service.TrackedRow
+import com.dylenq.eq.service.TrackingState
 import com.dylenq.eq.service.usableSampleRate
 import java.io.File
 import java.util.concurrent.ExecutorService
@@ -101,6 +104,8 @@ class EqRuntime(
     private sealed interface Command {
         data class Session(val event: SessionIntent.Event) : Command
         data class SetGlobal(val on: Boolean) : Command
+        data class TrackerOpen(val session: Int, val pkg: String) : Command
+        data class TrackerClose(val session: Int) : Command
     }
 
     // Bounded because the session receiver is exported: a flood from another app drops the oldest
@@ -123,7 +128,7 @@ class EqRuntime(
     // The persisted global mode is seeded the same way; the worker applies it before its first
     // publish, and a rejection then corrects the status through onGlobalRejected.
     private val _status = MutableStateFlow(
-        ServiceStatus(bypass = controller.snapshot().bypass, globalMode = settings.globalMode, engineMaxBands = measuredCap(), notice = storeNoticeText(opened.second))
+        ServiceStatus(bypass = controller.snapshot().bypass, globalMode = settings.globalMode, engineMaxBands = measuredCap(), tracking = if (settings.playerTracking) TrackingState.Working(0) else TrackingState.Off, notice = storeNoticeText(opened.second))
     )
     val status: StateFlow<ServiceStatus> = _status.asStateFlow()
 
@@ -151,6 +156,8 @@ class EqRuntime(
                                 is SessionIntent.Event.Close -> manager.onClose(e.session)
                             }
                             is Command.SetGlobal -> manager.setGlobalMode(c.on)
+                            is Command.TrackerOpen -> manager.onOpen(c.session, c.pkg, SessionSource.TRACKED)
+                            is Command.TrackerClose -> manager.onClose(c.session, SessionSource.TRACKED)
                         }
                     }
                     dirty.onReceive {
@@ -189,6 +196,18 @@ class EqRuntime(
     fun post(event: SessionIntent.Event) {
         if (closed) return
         events.trySend(Command.Session(event))
+    }
+
+    /** Enqueue what the player tracker found. Safe from any thread; handled on the worker in order. */
+    fun postTracked(opens: List<TrackedRow>, closes: List<Int>) {
+        if (closed) return
+        for (o in opens) events.trySend(Command.TrackerOpen(o.session, o.pkg))
+        for (c in closes) events.trySend(Command.TrackerClose(c))
+    }
+
+    /** Publishes the tracking state. Safe from any thread; publishStatus keeps the field. */
+    fun setTrackingState(state: TrackingState) {
+        _status.update { if (it.tracking == state) it else it.copy(tracking = state) }
     }
 
     /**
