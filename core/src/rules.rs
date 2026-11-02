@@ -69,25 +69,56 @@ pub struct DeviceRule {
     pub last_seen: u64,
 }
 
+impl DeviceRule {
+    /// A rule the user never gave a preset. Only these may be evicted.
+    fn is_default(&self) -> bool {
+        self.preset_key.is_none()
+    }
+}
+
+pub(crate) fn valid_device_key(key: &str) -> bool {
+    valid_pkg(key)
+}
+
+fn clip_name(name: &str) -> String {
+    name.chars().take(MAX_DEVICE_NAME_CHARS).collect()
+}
+
+/// [`sanitize_rules`] for devices: drops rules with a bad or repeated key and those past the limit,
+/// cuts overlong names and clears preset keys that no longer resolve. Returns how many rules were
+/// removed or changed.
+pub(crate) fn sanitize_devices(
+    list: Vec<DeviceRule>,
+    presets: &[presets::Preset],
+) -> (Vec<DeviceRule>, u32) {
+    let mut out: Vec<DeviceRule> = Vec::new();
+    let mut repairs: u32 = 0;
+    for mut r in list {
+        if !valid_device_key(&r.key)
+            || out.iter().any(|o| o.key == r.key)
+            || out.len() >= MAX_DEVICE_RULES
+        {
+            repairs = repairs.saturating_add(1);
+            continue;
+        }
+        if r.name.chars().count() > MAX_DEVICE_NAME_CHARS {
+            r.name = clip_name(&r.name);
+            repairs = repairs.saturating_add(1);
+        }
+        if r.preset_key.as_deref().is_some_and(|k| presets::find_in(presets, k).is_none()) {
+            r.preset_key = None;
+            repairs = repairs.saturating_add(1);
+        }
+        out.push(r);
+    }
+    (out, repairs)
+}
+
 impl Inner {
-    pub fn note_device(&mut self, _key: &str, _name: &str) -> bool {
-        false
-    }
-
-    pub fn set_device_preset(&mut self, _key: &str, _preset: Option<&str>) -> Result<(), EqError> {
-        Ok(())
-    }
-
-    pub fn device_rules(&self) -> &[DeviceRule] {
-        &[]
-    }
-
-    pub fn record_device(&mut self, _key: &str, _name: &str) -> Option<String> {
-        None
-    }
-
     fn next_tick(&self) -> u64 {
-        self.app_rules.iter().map(|r| r.last_seen).max().map_or(1, |m| m.saturating_add(1))
+        let apps = self.app_rules.iter().map(|r| r.last_seen);
+        let devices = self.device_rules.iter().map(|r| r.last_seen);
+        apps.chain(devices).max().map_or(1, |m| m.saturating_add(1))
     }
 
     /// Makes room for one more rule. False when every rule carries a user choice.
@@ -161,6 +192,101 @@ impl Inner {
         Ok(())
     }
 
+    /// Makes room for one more device rule. False when every rule carries a preset.
+    fn make_device_room(&mut self) -> bool {
+        if self.device_rules.len() < MAX_DEVICE_RULES {
+            return true;
+        }
+        let oldest = self
+            .device_rules
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.is_default())
+            .min_by_key(|(_, r)| r.last_seen)
+            .map(|(i, _)| i);
+        match oldest {
+            Some(i) => {
+                self.device_rules.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The index of the rule for `key`, created (subject to the bound) when absent. The name is
+    /// refreshed: the audio system may rename a device.
+    fn device_index(&mut self, key: &str, name: &str) -> Option<usize> {
+        if !valid_device_key(key) {
+            return None;
+        }
+        let name = clip_name(name);
+        let tick = self.next_tick();
+        if let Some(i) = self.device_rules.iter().position(|r| r.key == key) {
+            let r = &mut self.device_rules[i];
+            r.last_seen = tick;
+            if !name.is_empty() {
+                r.name = name;
+            }
+            return Some(i);
+        }
+        if !self.make_device_room() {
+            return None;
+        }
+        self.device_rules.push(DeviceRule {
+            key: key.to_string(),
+            name,
+            preset_key: None,
+            last_seen: tick,
+        });
+        Some(self.device_rules.len() - 1)
+    }
+
+    /// Records that an output device is in use. True when a rule was added, false when it was
+    /// already listed (that only refreshes its recency) or could not be kept.
+    pub fn note_device(&mut self, key: &str, name: &str) -> bool {
+        if self.device_rules.iter().any(|r| r.key == key) {
+            self.device_index(key, name);
+            return false;
+        }
+        self.device_index(key, name).is_some()
+    }
+
+    /// Assigns a preset to a device, or `None` to keep the current sound. A key that does not
+    /// resolve is `NotFound` and changes nothing. An unknown device is created (named by its key
+    /// until it is seen), subject to the bound.
+    pub fn set_device_preset(&mut self, key: &str, preset: Option<&str>) -> Result<(), EqError> {
+        if preset.is_some_and(|k| self.find_preset(k).is_none()) {
+            return Err(EqError::NotFound);
+        }
+        let known = self.device_rules.iter().any(|r| r.key == key);
+        let name = if known { "" } else { key };
+        if let Some(i) = self.device_index(key, name) {
+            self.device_rules[i].preset_key = preset.map(str::to_string);
+        }
+        Ok(())
+    }
+
+    pub fn device_rules(&self) -> &[DeviceRule] {
+        &self.device_rules
+    }
+
+    /// Records the output device now in use and returns the preset to apply, if any. That is only
+    /// when the device differs from the persisted `last_device` and its rule has a preset, so a
+    /// restart on the same device never overrides manual edits. Applying is the caller's job.
+    pub fn record_device(&mut self, key: &str, name: &str) -> Option<String> {
+        if !valid_device_key(key) {
+            return None;
+        }
+        let changed = self.last_device.as_deref() != Some(key);
+        let preset = self.device_index(key, name).and_then(|i| self.device_rules[i].preset_key.clone());
+        self.last_device = Some(key.to_string());
+        if changed {
+            preset
+        } else {
+            None
+        }
+    }
+
     pub fn app_rules(&self) -> &[AppRule] {
         &self.app_rules
     }
@@ -168,6 +294,11 @@ impl Inner {
     /// Follows a preset rename (`new` is the new key) or delete (`None`: back to the live EQ).
     pub(crate) fn rekey_rules(&mut self, old: &str, new: Option<&str>) {
         for r in &mut self.app_rules {
+            if r.preset_key.as_deref() == Some(old) {
+                r.preset_key = new.map(str::to_string);
+            }
+        }
+        for r in &mut self.device_rules {
             if r.preset_key.as_deref() == Some(old) {
                 r.preset_key = new.map(str::to_string);
             }

@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::error::EqError;
 use crate::inner::{DEFAULT_FRAME_MS, Inner, MAX_FRAME_MS, MIN_FRAME_MS, TONE_MAX_DB};
 use crate::presets::{self, Preset};
-use crate::rules::{self, AppRule, MAX_APP_RULES};
+use crate::rules::{self, AppRule, DeviceRule, MAX_APP_RULES, MAX_DEVICE_RULES};
 use crate::model::{
     Band, EqMode, EqState, GRAPHIC_COUNTS, GRAPHIC_MAX_DB, GraphicState, MAX_BANDS, MAX_GAIN_DB,
 };
@@ -68,6 +68,10 @@ pub struct PersistedState {
     pub active_preset: Option<String>,
     #[serde(default)]
     pub app_rules: Vec<AppRule>,
+    #[serde(default)]
+    pub device_rules: Vec<DeviceRule>,
+    #[serde(default)]
+    pub last_device: Option<String>,
 }
 
 impl PersistedState {
@@ -87,6 +91,8 @@ impl PersistedState {
             presets: s.presets.clone(),
             active_preset: s.active_preset.clone(),
             app_rules: s.app_rules.clone(),
+            device_rules: s.device_rules.clone(),
+            last_device: s.last_device.clone(),
         }
     }
 
@@ -105,6 +111,8 @@ impl PersistedState {
             presets: self.presets,
             active_preset: self.active_preset,
             app_rules: self.app_rules,
+            device_rules: self.device_rules,
+            last_device: self.last_device,
             ..Inner::default()
         }
     }
@@ -166,7 +174,15 @@ fn sanitize_counted(mut p: PersistedState) -> Result<(PersistedState, u32), EqEr
     }
     let (kept, fixed) = rules::sanitize_rules(std::mem::take(&mut p.app_rules), &p.presets);
     p.app_rules = kept;
-    Ok((p, removed.saturating_add(fixed)))
+    let (kept, fixed_devices) =
+        rules::sanitize_devices(std::mem::take(&mut p.device_rules), &p.presets);
+    p.device_rules = kept;
+    let mut repaired = removed.saturating_add(fixed).saturating_add(fixed_devices);
+    if p.last_device.as_deref().is_some_and(|k| !rules::valid_device_key(k)) {
+        p.last_device = None;
+        repaired = repaired.saturating_add(1);
+    }
+    Ok((p, repaired))
 }
 
 fn count(repairs: &mut u32) {
@@ -275,21 +291,21 @@ fn read_presets(raw: Option<Value>, repairs: &mut u32) -> Vec<Preset> {
     }
 }
 
-/// App rules one at a time: one that does not read is dropped and counted, rules past the limit
+/// Rules one at a time: one that does not read is dropped and counted, rules past the limit
 /// are cut and counted (by `sanitize`). An entry that is not a list is no rules, counted.
-fn read_app_rules(raw: Option<Value>, repairs: &mut u32) -> Vec<AppRule> {
+fn read_rules<T: DeserializeOwned>(raw: Option<Value>, max: usize, repairs: &mut u32) -> Vec<T> {
     match raw {
         None => Vec::new(),
         Some(Value::Array(items)) => {
             // Past twice the limit nothing is parsed: the rest is cut here and counted.
-            let skipped = items.len().saturating_sub(MAX_APP_RULES * 2);
+            let skipped = items.len().saturating_sub(max * 2);
             for _ in 0..skipped {
                 count(repairs);
             }
             items
                 .into_iter()
-                .take(MAX_APP_RULES * 2)
-                .filter_map(|v| match serde_json::from_value::<AppRule>(v) {
+                .take(max * 2)
+                .filter_map(|v| match serde_json::from_value::<T>(v) {
                     Ok(r) => Some(r),
                     Err(_) => {
                         count(repairs);
@@ -345,7 +361,17 @@ pub fn parse(bytes: &[u8]) -> Result<Inner, EqError> {
             Some(Value::String(key)) => Some(key),
             _ => None,
         },
-        app_rules: read_app_rules(o.remove("app_rules"), r),
+        app_rules: read_rules(o.remove("app_rules"), MAX_APP_RULES, r),
+        device_rules: read_rules(o.remove("device_rules"), MAX_DEVICE_RULES, r),
+        // A null is none; any other wrong type is none, counted.
+        last_device: match o.remove("last_device") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(key)) => Some(key),
+            Some(_) => {
+                count(r);
+                None
+            }
+        },
     };
     // Every value above is typed and finite; this clamps the ranges and drops unusable presets.
     // It cannot fail on such input, and if it ever did the file is Corrupt rather than a panic.
