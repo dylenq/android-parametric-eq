@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -149,7 +150,8 @@ class SettingsTest {
 
     @Test fun aboutRowHasNameVersionGplAndNoUrl() {
         rule.launch(); compose.waitForIdle(); openSettings()
-        compose.onNodeWithTag("about-row").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("about-row"))
+        compose.onNodeWithTag("about-row").assertIsDisplayed()
         compose.onNodeWithText("EQ for Android").assertExists()
         val core = rule.runtime.controller.coreVersion()
         compose.onNodeWithText("core $core", substring = true).assertExists()

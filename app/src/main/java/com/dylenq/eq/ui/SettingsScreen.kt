@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
@@ -133,7 +134,12 @@ fun SettingsScreen(
         },
     ) { pad ->
         Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-            LazyColumn(Modifier.widthIn(max = 640.dp).fillMaxSize().testTag("settings-list")) {
+            // The notice is a new first item. A list longer than the screen keeps its current rows in place, so
+            // the notice would land above the screen and a rejected switch would just flip back with no reason.
+            val listState = rememberLazyListState()
+            val notice = status.notice
+            LaunchedEffect(notice) { if (notice != null) listState.scrollToItem(0) }
+            LazyColumn(Modifier.widthIn(max = 640.dp).fillMaxSize().testTag("settings-list"), state = listState) {
                 if (status.notice != null) {
                     item(key = "notice") {
                         Box(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
