@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # README screenshots: Graphic light/dark, Parametric light/dark, the preset list, the Tone & balance card,
-# and Settings showing the current versionName and the measured engine band count.
+# the player tracking setup, the Apps list, and Settings showing the current versionName and the measured engine band count.
 # Replaces any installed build with the debug build (visuals are identical; only the debug build has the
 # state-setting broadcast commands), builds each state BEFORE launching, captures with `adb exec-out screencap`.
 # Device settings it changes are restored by the trap. Exits non-zero on an empty screenshot or a missing
-# screen element. Usage: readme-screens.sh   (SHOTS="graphic parametric presets tone settings" picks a subset)
+# screen element. Usage: readme-screens.sh   (SHOTS="graphic parametric presets tone tracking apps settings" picks a subset)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/spike-tools/env.sh"
@@ -13,7 +13,7 @@ cd "$ROOT"
 OUT="${OUT:-$ROOT/docs}"
 mkdir -p "$OUT"
 VERSION="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
-SHOTS="${SHOTS:-graphic parametric presets tone settings}"
+SHOTS="${SHOTS:-graphic parametric presets tone tracking apps settings}"
 want() { case " $SHOTS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 bash "$ROOT/spike-tools/emulator-up.sh"
@@ -176,6 +176,44 @@ if want tone; then
   scroll_to '^Balance'
   sleep 1
   snap screenshot-tone
+fi
+
+open_settings() {
+  launch
+  tap_node '^More options$'; sleep 1
+  tap_node '^Settings$'; sleep 2
+}
+
+if want tracking; then
+  reset_graphic
+  "$ADB" shell pm revoke "$PKG" android.permission.DUMP 2>/dev/null || true
+  cmd --es cmd set-tracking --es value on
+  open_settings
+  scroll_to 'adb shell pm grant'
+  sleep 1
+  need_node 'Needs a permission'
+  snap screenshot-tracking
+  cmd --es cmd set-tracking --es value off
+fi
+
+if want apps; then
+  reset_graphic
+  open_settings
+  # Sample sessions announced the way a player would, so the list has rows to show.
+  n=9001
+  for p in com.example.music com.example.podcasts com.example.video; do
+    "$ADB" shell am broadcast -a android.media.action.OPEN_AUDIO_EFFECT_CONTROL_SESSION -n "$PKG/.service.SessionReceiver" --ei android.media.extra.AUDIO_SESSION "$n" --es android.media.extra.PACKAGE_NAME "$p" >/dev/null
+    n=$((n + 1))
+  done
+  sleep 2
+  scroll_to 'com\.example\.video'
+  sleep 1
+  snap screenshot-apps
+  n=9001
+  for p in com.example.music com.example.podcasts com.example.video; do
+    "$ADB" shell am broadcast -a android.media.action.CLOSE_AUDIO_EFFECT_CONTROL_SESSION -n "$PKG/.service.SessionReceiver" --ei android.media.extra.AUDIO_SESSION "$n" --es android.media.extra.PACKAGE_NAME "$p" >/dev/null
+    n=$((n + 1))
+  done
 fi
 
 if want settings; then

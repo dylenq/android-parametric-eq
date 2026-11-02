@@ -2,10 +2,13 @@
 
 All notable changes are listed here, in the style of Keep a Changelog.
 
-## Unreleased
+## 0.3.0 - 2026-11-03
+
+Checked on an Android 17 arm64 emulator only; this version has not been on a physical phone. The release APK is signed with the project's public test key. Real players, a real Shizuku server, real headphones, Bluetooth and USB outputs, the system file picker and how any of this sounds are not verified. The README has the full list.
 
 ### Added
 
+- Advanced player tracking, off by default. With the `DUMP` permission, granted once with an adb command or through Shizuku, EQ reaches players that never announce an audio session, and lets go when they stop. Settings always shows whether it is off, needs the permission, is working, needs one reboot or is not supported. Apps that announce keep working in every state.
 - Per-app control in Settings. The new Apps section lists the apps EQ has seen. Each one has a switch to turn EQ off for that app and a picker to give it its own preset instead of the live EQ. Global mode ignores these settings.
 - Device presets. The new Output devices section in Settings lists the speakers and headphones EQ has seen. Give a device a preset and it is applied to the live EQ when you switch to that device. A device with no preset keeps the current sound.
 - A Quick Settings tile that turns EQ on and off. It works even when the EQ service is not running.
@@ -13,6 +16,7 @@ All notable changes are listed here, in the style of Keep a Changelog.
 
 ### Fixed
 
+- A notice about a rejected global mode could land above the visible part of a long Settings list. Settings now scrolls up to it.
 - A damaged entry in the saved settings now costs only that entry instead of the whole file. The app says so, and a copy of the original file is kept.
 - Deleting a band, or undoing a deletion, no longer leaves a filter-type menu open on the band that takes its place.
 - A band field's unsaved text could be written to the wrong band after the band above it was deleted.
