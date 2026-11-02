@@ -4,7 +4,9 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::error::EqError;
+use crate::export;
 use crate::headroom::LimiterParams;
+use crate::import;
 use crate::inner::{DEFAULT_FRAME_MS, Engine, Inner};
 use crate::model::{Band, EqMode};
 use crate::persist;
@@ -258,12 +260,26 @@ impl EqCore {
         text: String,
         graphic_band_count: u32,
     ) -> Result<ImportReport, EqError> {
-        todo!()
+        let parsed = import::parse_any(&text, graphic_band_count)?;
+        let (key, name) = self.lock().add_imported_preset(&file_name, &parsed, graphic_band_count)?;
+        let filters = match parsed.kind {
+            ImportKind::Parametric => parsed.bands.len(),
+            ImportKind::Graphic => parsed.graphic_gains.len(),
+        };
+        Ok(ImportReport {
+            key,
+            name,
+            kind: parsed.kind,
+            filters: filters as u32,
+            skipped: parsed.skipped as u32,
+            clamped: parsed.clamped as u32,
+        })
     }
 
     /// The live parametric bands and preamp as ParametricEQ.txt text, in any mode.
     pub fn export_parametric_text(&self) -> String {
-        todo!()
+        let s = self.lock();
+        export::parametric_text(&s.parametric, s.preamp_db)
     }
 
     pub fn save_preset(&self, name: String) -> Result<String, EqError> {

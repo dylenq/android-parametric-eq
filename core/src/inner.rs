@@ -4,14 +4,18 @@
 use crate::achieved::BinGains;
 use crate::error::EqError;
 use crate::dsp::biquad::Coeffs;
+use crate::api::ImportKind;
 use crate::fit;
 use crate::graphic;
 use crate::grid::{self, Grid};
 use crate::headroom::{self, LimiterParams};
 use crate::history::{EditSnapshot, History, PresetCtx};
+use crate::import::{self, Parsed};
 use crate::rules::{AppRule, DeviceRule};
 use crate::presets::{self, MAX_USER_PRESETS, Preset, PresetCurve};
-use crate::model::{Band, EqMode, EqState, FilterKind, GraphicState, MAX_BANDS, MAX_GAIN_DB};
+use crate::model::{
+    Band, EqMode, EqState, FilterKind, GRAPHIC_COUNTS, GraphicState, MAX_BANDS, MAX_GAIN_DB,
+};
 
 pub const DEFAULT_FRAME_MS: f32 = 85.3;
 pub const MIN_FRAME_MS: f32 = 5.0;
@@ -540,6 +544,52 @@ impl Inner {
         let key = presets::user_key(&stored);
         self.active_preset = Some(key.clone());
         Ok(key)
+    }
+
+    /// Stores a parsed AutoEq file as a user preset named after `file_name`. Does not apply it,
+    /// activate it or touch history. Nothing changes unless it succeeds. Returns key and name.
+    pub(crate) fn add_imported_preset(
+        &mut self,
+        file_name: &str,
+        parsed: &Parsed,
+        graphic_band_count: u32,
+    ) -> Result<(String, String), EqError> {
+        if !GRAPHIC_COUNTS.contains(&graphic_band_count) {
+            return Err(EqError::InvalidValue);
+        }
+        if self.presets.len() >= MAX_USER_PRESETS {
+            return Err(EqError::TooManyPresets);
+        }
+        let taken: Vec<String> = self.presets.iter().map(|p| p.name.clone()).collect();
+        let name = presets::validate_name(&import::preset_name(file_name, &taken))?;
+        let mut curve = match parsed.kind {
+            ImportKind::Parametric => PresetCurve {
+                mode: EqMode::Parametric,
+                bands: parsed.bands.clone(),
+                graphic_band_count,
+                graphic_gains_db: vec![0.0; graphic_band_count as usize],
+                preamp_db: parsed.preamp_db,
+                bass_db: 0.0,
+                treble_db: 0.0,
+                balance: 0.0,
+            },
+            ImportKind::Graphic => PresetCurve {
+                mode: EqMode::Graphic,
+                bands: EqState::default().bands,
+                graphic_band_count,
+                graphic_gains_db: parsed.graphic_gains.clone(),
+                preamp_db: parsed.preamp_db,
+                bass_db: 0.0,
+                treble_db: 0.0,
+                balance: 0.0,
+            },
+        };
+        if !curve.sanitize() {
+            return Err(EqError::InvalidValue);
+        }
+        let key = presets::user_key(&name);
+        self.presets.push(Preset { name: name.clone(), curve });
+        Ok((key, name))
     }
 
     fn user_index(&self, key: &str) -> Result<usize, EqError> {
