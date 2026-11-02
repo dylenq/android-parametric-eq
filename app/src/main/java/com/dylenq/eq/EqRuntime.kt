@@ -180,7 +180,9 @@ class EqRuntime(
     // starts, and a gesture cannot open while one runs (D-05).
     private val gestureLock = Any()
     private var gestureOpen = false
-    private var pendingDevice: Pair<String, String>? = null
+    // The route key is kept so a route that moved on before the gesture ended cancels the preset.
+    private class PendingDevice(val preset: String, val name: String, val routeKey: String)
+    private var pendingDevice: PendingDevice? = null
 
     /** Invoked on the worker after every apply. The persistence plan fills this in. */
     @Volatile var onApplied: () -> Unit = {}
@@ -322,7 +324,7 @@ class EqRuntime(
             gestureOpen = open
             if (!open) pendingDevice.also { pendingDevice = null } else null
         }
-        if (due != null && !closed) scope.launch { applyDevicePreset(due.first, due.second) }
+        if (due != null && !closed) scope.launch { applyDevicePreset(due.preset, due.name, due.routeKey) }
     }
 
     /** The route key last seen by [handleRoute]; null until the first route check. */
@@ -334,14 +336,15 @@ class EqRuntime(
             val info = route?.current()
             if (info != null) {
                 currentDeviceKey = info.key
+                synchronized(gestureLock) { if (pendingDevice?.routeKey != info.key) pendingDevice = null }
                 val key = controller.recordDevice(info.key, info.name)
                 needsSave = true
                 restartSaveTimer()
                 if (key != null) {
                     val deferred = synchronized(gestureLock) {
-                        if (gestureOpen) { pendingDevice = key to info.name; true } else false
+                        if (gestureOpen) { pendingDevice = PendingDevice(key, info.name, info.key); true } else false
                     }
-                    if (!deferred) applyDevicePreset(key, info.name)
+                    if (!deferred) applyDevicePreset(key, info.name, info.key)
                 }
             }
         } catch (t: Throwable) {
@@ -352,12 +355,12 @@ class EqRuntime(
     }
 
     // Worker only. Goes through the same apply_preset path as the UI: one undo step.
-    private fun applyDevicePreset(presetKey: String, device: String) {
+    private fun applyDevicePreset(presetKey: String, device: String, routeKey: String) {
         val name = controller.snapshot().presets.firstOrNull { it.key == presetKey }?.name
         val recorded = try {
             synchronized(gestureLock) {
                 if (gestureOpen) {
-                    pendingDevice = presetKey to device
+                    pendingDevice = PendingDevice(presetKey, device, routeKey)
                     return
                 }
                 controller.applyPreset(presetKey)

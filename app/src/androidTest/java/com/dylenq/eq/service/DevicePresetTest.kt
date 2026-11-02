@@ -217,6 +217,30 @@ class DevicePresetTest {
     }
 
     @Test
+    fun a_deferred_preset_is_dropped_when_the_device_is_gone_before_the_gesture_ends() {
+        val rt = runtime()
+        val holder = holderFor(rt)
+        val key = seedBright(rt)
+        rt.controller.setDevicePreset(buds.key, key)
+        settleOnSpeaker(rt)
+
+        holder.onBandDragStart(0)
+        holder.onBandDragChange(0, 2f)
+        route.info = buds
+        rt.onRouteChanged()
+        Thread.sleep(400)
+        // The buds are unplugged again before the finger lifts.
+        route.info = RouteInfo.SPEAKER
+        rt.onRouteChanged()
+        Thread.sleep(400)
+        holder.onBandDragEnd()
+        Thread.sleep(600)
+
+        assertEquals("the buds' preset must not land on the speaker", 0, rt.coreRevision.value)
+        assertEquals(2f, gain0(rt), 0.001f)
+    }
+
+    @Test
     fun a_session_with_an_app_preset_is_left_alone() {
         val rt = runtime()
         rt.controller.edit { it.setGraphicGain(0u, 4f) }
