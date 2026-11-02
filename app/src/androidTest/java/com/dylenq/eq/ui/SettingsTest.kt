@@ -104,7 +104,8 @@ class SettingsTest {
 
     @Test fun startOnBootPersistsToTheSettingsStore() {
         rule.launch(); compose.waitForIdle(); openSettings()
-        compose.onNodeWithTag("start-on-boot").performScrollTo().assertIsOff()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("start-on-boot"))
+        compose.onNodeWithTag("start-on-boot").assertIsOff()
         assertFalse("defaults to off", rule.runtimeRule.settings.startOnBoot)
         compose.onNodeWithTag("start-on-boot").performClick(); compose.waitForIdle()
         assertTrue(rule.runtimeRule.settings.startOnBoot)
@@ -125,7 +126,8 @@ class SettingsTest {
 
     @Test fun emptySessionsShowTheEmptyBlock() {
         rule.launch(); compose.waitForIdle(); openSettings()
-        compose.onNodeWithTag("sessions-empty").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("settings-list").performScrollToNode(hasTestTag("sessions-empty"))
+        compose.onNodeWithTag("sessions-empty").assertIsDisplayed()
         assertTrue(existsText("No audio sessions detected"))
         assertTrue(existsText("Play something in another app", sub = true))
         assertFalse(exists("sessions-count"))
