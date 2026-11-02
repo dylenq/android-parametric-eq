@@ -132,4 +132,126 @@ class PerAppTest {
         assertTrue(err != null)
         assertEquals(null, appRule("com.a")?.presetKey)
     }
+
+    private fun stateOf(session: Int) = rt.runtime.status.value.sessions.firstOrNull { it.id == session }?.state
+
+    @Test
+    fun off_releases_at_once_new_sessions_are_not_attached_and_on_attaches_again() {
+        open(1, "com.a")
+        assertTrue(poll { fake.handle(1) != null })
+        rt.runtime.setAppEnabled("com.a", false)
+        assertTrue(poll { fake.callCount(1, "release") == 1 })
+        assertTrue(poll { stateOf(1) == SessionState.DISABLED })
+        assertEquals(SessionState.DISABLED, appRule("com.a")?.state)
+        assertEquals(false, appRule("com.a")?.enabled)
+
+        open(2, "com.a")
+        assertTrue(poll { stateOf(2) == SessionState.DISABLED })
+        assertEquals("a session from an off app creates nothing", 0, fake.callCount(2, "create"))
+
+        rt.runtime.setAppEnabled("com.a", true)
+        assertTrue(poll { fake.callCount(1, "create") == 2 && fake.callCount(2, "create") == 1 })
+        assertTrue(poll { stateOf(1) == SessionState.OK && stateOf(2) == SessionState.OK })
+    }
+
+    @Test
+    fun disabled_sessions_count_toward_the_cap() {
+        val factory = FakeEffectFactory()
+        val mgr = EffectManager(
+            factory, { com.dylenq.eq.core.EqCore().engineParams(48000u, 85.3f) },
+            maxSessions = 2, sleeper = Sleeper { }, isEnabled = { it != "off" },
+        )
+        mgr.onOpen(1, "off")
+        mgr.onOpen(2, "on")
+        mgr.onOpen(3, "on")
+        assertEquals(2, mgr.sessionCount())
+        assertEquals("the least recently seen (the disabled one) is dropped", listOf(2, 3), mgr.sessionInfos().map { it.id })
+        assertEquals(0, factory.callCount(2, "release"))
+    }
+
+    @Test
+    fun global_mode_ignores_the_rules_and_they_apply_again_afterwards() {
+        open(1, "com.a")
+        assertTrue(poll { fake.handle(1) != null })
+        rt.runtime.setGlobalMode(true)
+        assertTrue(poll { rt.runtime.status.value.globalMode })
+        assertEquals(1, fake.callCount(0, "create"))
+        rt.runtime.setAppEnabled("com.a", false)
+        Thread.sleep(300)
+        assertEquals("per-app off has no effect in global mode", 0, fake.callCount(0, "release"))
+        assertEquals(SessionState.SUPPRESSED, stateOf(1))
+
+        rt.runtime.setGlobalMode(false)
+        assertTrue(poll { !rt.runtime.status.value.globalMode })
+        assertTrue(poll { stateOf(1) == SessionState.DISABLED })
+        assertEquals("no new effect for the off app", 1, fake.callCount(1, "create"))
+    }
+
+    @Test
+    fun turning_on_with_a_failing_create_ends_failed() {
+        open(1, "com.a")
+        assertTrue(poll { fake.handle(1) != null })
+        rt.runtime.setAppEnabled("com.a", false)
+        assertTrue(poll { stateOf(1) == SessionState.DISABLED })
+        fake.failSession(1, IllegalStateException("boom"))
+        rt.runtime.setAppEnabled("com.a", true)
+        assertTrue(poll { stateOf(1) == SessionState.FAILED })
+    }
+
+    @Test
+    fun status_apps_lists_rules_with_what_is_playing() {
+        assertTrue(rt.runtime.status.value.apps.isEmpty())
+        open(1, "com.a")
+        assertTrue(poll { appRule("com.a") != null })
+        val a = appRule("com.a")!!
+        assertEquals(AppEntry("com.a", true, null, "com.a", true, SessionState.OK), a)
+        close(1)
+        assertTrue(poll { appRule("com.a")?.playingNow == false })
+        assertEquals(null, appRule("com.a")?.state)
+    }
+
+    @Test
+    fun spoofed_packages_through_the_runtime_never_erase_a_user_rule() {
+        open(1, "com.keep")
+        assertTrue(poll { fake.handle(1) != null })
+        rt.runtime.setAppEnabled("com.keep", false)
+        for (i in 0 until 150) rt.runtime.post(SessionIntent.Event.Open(100 + i, "com.spam.p$i"))
+        assertTrue(poll { rt.runtime.status.value.apps.size == 64 })
+        Thread.sleep(300)
+        assertTrue(rt.runtime.status.value.apps.size <= 64)
+        assertEquals(false, appRule("com.keep")?.enabled)
+    }
+
+    @Test
+    fun rules_survive_process_death() {
+        open(1, "com.a")
+        open(2, "com.b")
+        assertTrue(poll { fake.handle(1) != null && fake.handle(2) != null })
+        val key = makePreset("Warm", 9f)
+        rt.runtime.setAppEnabled("com.a", false)
+        assertEquals(null, rt.runtime.setAppPreset("com.b", key))
+        assertTrue(poll { appRule("com.b")?.presetKey == key })
+        rt.runtime.flush()
+        rt.runtime.shutdown()
+
+        val fake2 = FakeEffectFactory()
+        val rt2 = com.dylenq.eq.EqRuntime(fake2, rt.dir, rt.settings)
+        try {
+            assertTrue(poll { rt2.status.value.apps.size == 2 })
+            val apps = rt2.status.value.apps.associateBy { it.pkg }
+            assertEquals(false, apps["com.a"]!!.enabled)
+            assertEquals(key, apps["com.b"]!!.presetKey)
+            assertEquals(false, apps["com.b"]!!.playingNow)
+
+            rt2.post(SessionIntent.Event.Open(1, "com.a"))
+            rt2.post(SessionIntent.Event.Open(2, "com.b"))
+            assertTrue(poll { rt2.status.value.sessions.size == 2 })
+            assertEquals(SessionState.DISABLED, rt2.status.value.sessions.first { it.id == 1 }.state)
+            assertEquals(0, fake2.callCount(1, "create"))
+            val live = rt2.controller.engineParams(48000u, 85.3f).gainsDb
+            assertNotEquals(live, fake2.creates().last { it.first == 2 }.second.gainsDb)
+        } finally {
+            rt2.shutdown()
+        }
+    }
 }
