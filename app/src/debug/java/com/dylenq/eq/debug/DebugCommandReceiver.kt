@@ -53,6 +53,7 @@ class DebugCommandReceiver : BroadcastReceiver() {
                 "set-bypass" -> c.setBypass(on(intent))
                 "set-global" -> rt.setGlobalMode(on(intent))
                 "set-tracking" -> rt.setPlayerTracking(on(intent))
+                "recheck-tracking" -> rt.recheckTracking()
                 "set-max-bands" -> rt.overrideEngineBandCap(intent.getIntExtra("value", -1).takeIf { it > 0 })
                 "set-start-on-boot" -> rt.setStartOnBoot(on(intent))
                 // Preset keys are "builtin:<name>" or "user:<name>". These skip the UI's name checks.

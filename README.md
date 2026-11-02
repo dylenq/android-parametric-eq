@@ -139,7 +139,7 @@ It does not request `RECORD_AUDIO`, and it does not read or store your audio. Yo
 | Rust | stable, with targets `aarch64-linux-android`, `armv7-linux-androideabi` and `x86_64-linux-android` |
 | cargo-ndk | 4.1.2 |
 
-Gradle fetches the rest. The main dependencies are Jetpack Compose and Material 3, Kotlin coroutines, UniFFI and JNA for the bridge to Rust, and serde for the state file. Versions are pinned in [app/build.gradle.kts](app/build.gradle.kts) and [core/Cargo.toml](core/Cargo.toml).
+Gradle fetches the rest. The main dependencies are Jetpack Compose and Material 3, Kotlin coroutines, UniFFI and JNA for the bridge to Rust, serde for the state file, and Shizuku-API (MIT) for the optional one-tap permission grant. Versions are pinned in [app/build.gradle.kts](app/build.gradle.kts) and [core/Cargo.toml](core/Cargo.toml).
 
 ### Build and test
 

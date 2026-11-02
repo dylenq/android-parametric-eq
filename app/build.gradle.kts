@@ -13,6 +13,7 @@ val composeVersion = "1.10.6"
 val material3Version = "1.4.0"
 val activityComposeVersion = "1.13.0"
 val lifecycleComposeVersion = "2.10.0"
+val shizukuVersion = "13.1.5"
 
 // Release signing inputs: keystore.properties (git-ignored) or EQ_KEYSTORE_* env vars. Blank counts as absent.
 val keystoreProps = Properties().also { props ->
@@ -78,6 +79,11 @@ android {
     // Local (offline) and CI runs must take the same path, so release lint is off.
     lint {
         checkReleaseBuilds = false
+    }
+
+    // IGrantService, the Shizuku user service interface.
+    buildFeatures {
+        aidl = true
     }
 
     compileOptions {
@@ -194,6 +200,9 @@ dependencies {
     implementation("androidx.compose.material3:material3:$material3Version")
     implementation("androidx.activity:activity-compose:$activityComposeVersion")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:$lifecycleComposeVersion")
+    // Shizuku-API (MIT): lets the user grant DUMP from a running Shizuku server instead of a computer.
+    implementation("dev.rikka.shizuku:api:$shizukuVersion")
+    implementation("dev.rikka.shizuku:provider:$shizukuVersion")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4:$composeVersion")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
