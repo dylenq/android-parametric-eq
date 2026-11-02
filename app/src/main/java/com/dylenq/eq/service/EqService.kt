@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioDeviceCallback
-import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.audiofx.AudioEffect
 import android.os.Build
@@ -33,20 +32,8 @@ class EqService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        running = try {
-            startInForeground()
-            startRuntimeWork()
-            true
-        } catch (t: Exception) {
-            // Android may refuse a background start (a sticky restart while the app is not visible, for
-            // example), and the core may fail to load. Neither should bring up a crash dialog: the
-            // Activity starts the service again and shows its own error screen when the core is at fault.
-            Log.w(TAG, "start failed: ${t.javaClass.name}: ${t.message}")
-            false
-        } catch (e: LinkageError) {
-            Log.e(TAG, "core library failed to load: ${e.message}")
-            false
-        }
+        // A refused background start or a core that will not load is not a crash: see runStartSteps.
+        running = runStartSteps(::startInForeground, ::startRuntimeWork)
         if (!running) stopSelf()
     }
 
@@ -82,10 +69,7 @@ class EqService : Service() {
 
         // A new output (headphones, Bluetooth) can change the sample rate the curve is fitted to.
         val audio = getSystemService(AudioManager::class.java)
-        val dc = object : AudioDeviceCallback() {
-            override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = app.runtime().reapply()
-            override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) = app.runtime().reapply()
-        }
+        val dc = OutputRouteCallback { app.runtime().reapply() }
         audio.registerAudioDeviceCallback(dc, null)
         deviceCallback = dc
 
@@ -133,7 +117,7 @@ class EqService : Service() {
     }
 
     companion object {
-        private const val TAG = "EQ-SVC"
+        private const val TAG = SERVICE_TAG
         const val NOTIFICATION_ID = 1
         const val ACTION_TOGGLE_BYPASS = "com.dylenq.eq.action.TOGGLE_BYPASS"
         private const val NOTIFY_PAUSE_MS = 250L
