@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -79,6 +80,8 @@ internal fun BandRow(
     selected: Boolean,
     first: Boolean,
     last: Boolean,
+    /** The number of bands in the list; the Kind menu closes whenever it changes. */
+    bandCount: Int,
     actions: BandListActions,
     fields: @Composable (Int, Band) -> Unit,
     modifier: Modifier = Modifier,
@@ -101,7 +104,10 @@ internal fun BandRow(
             exit = shrinkVertically(tween(ms)),
         ) {
             Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).testTag("band-expanded-$index")) {
-                KindSelector(index, band, actions.onSetKind)
+                // Keyed on the band count: a delete changes which band sits at an index, and a row that survives
+                // it (the selected band after an earlier one is removed) must not keep a menu open. Starting the
+                // selector over drops the menu's window at once instead of fading it out.
+                key(bandCount) { KindSelector(index, band, actions.onSetKind) }
                 Spacer(Modifier.height(8.dp))
                 fields(index, band)
                 BandActions(index, band, actions)

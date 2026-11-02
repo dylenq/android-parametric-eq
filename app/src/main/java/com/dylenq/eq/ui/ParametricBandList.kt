@@ -153,6 +153,7 @@ fun ParametricBandList(
                 selected = i == selected,
                 first = i == 0,
                 last = i == bandsSize - 1,
+                bandCount = bandsSize,
                 actions = actions,
                 fields = fields,
             )

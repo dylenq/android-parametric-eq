@@ -556,7 +556,7 @@ class UiStateHolder(val runtime: EqRuntime) {
             }
             edited()
             _ui.update { it.copy(selectedBand = null) }
-            republishLocked()
+            republishLocked(freshIds = true)
             emit("Bands and preamp reset", undoable = true)
             return@guarded
         }
@@ -596,7 +596,7 @@ class UiStateHolder(val runtime: EqRuntime) {
             return@guarded
         }
         _ui.update { it.copy(selectedBand = null, lastTouchedBand = null) }
-        republishLocked()
+        republishLocked(freshIds = true)
         emit("Applied $name", undoable = recorded)
     }
 
@@ -687,7 +687,7 @@ class UiStateHolder(val runtime: EqRuntime) {
         if (gestureDepth > 0) return@guarded
         edited()
         controller.edit { it.undo() }
-        republishLocked()
+        republishLocked(freshIds = true)
     }
 
     /**
@@ -703,7 +703,7 @@ class UiStateHolder(val runtime: EqRuntime) {
         if (gestureDepth > 0) return@guarded
         edited()
         controller.edit { it.redo() }
-        republishLocked()
+        republishLocked(freshIds = true)
     }
 
     fun dismissNotice() {
@@ -755,12 +755,13 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     /**
      * Re-reads the core snapshot (callers hold [lock]); status fields come from the runtime. The row ids are
-     * settled here, outside the update (which may be retried), and kept unless the id list and the band count
-     * disagree.
+     * settled here, outside the update (which may be retried): kept, unless [freshIds] asks for all new ones
+     * (undo, redo, preset apply and reset can put a different band at any index) or the id list and the band
+     * count disagree.
      */
-    private fun republishLocked(st: ServiceStatus = runtime.status.value) {
+    private fun republishLocked(st: ServiceStatus = runtime.status.value, freshIds: Boolean = false) {
         val snap = controller.snapshot()
-        val ids = bandIdSource.reconciled(_ui.value.bandIds, snap.bands.size)
+        val ids = if (freshIds) bandIdSource.fresh(snap.bands.size) else bandIdSource.reconciled(_ui.value.bandIds, snap.bands.size)
         _ui.update { fromSnapshot(it, snap, st).copy(bandIds = ids) }
         refreshCurve()
     }

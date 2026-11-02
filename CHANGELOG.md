@@ -6,6 +6,7 @@ All notable changes are listed here, in the style of Keep a Changelog.
 
 ### Fixed
 
+- Deleting a band, or undoing a deletion, no longer leaves a filter-type menu open on the band that takes its place.
 - A band field's unsaved text could be written to the wrong band after the band above it was deleted.
 - The app no longer crashes when Android refuses to start the service in the background, or when the audio core fails to load. It shows an error screen in the second case.
 - When saved settings cannot be written (a full disk, for example) the app says so and retries, instead of silently losing changes after a restart.

@@ -80,7 +80,8 @@ class BandRowIdentityTest {
 
     /**
      * Runs [change] with the main clock held and lets two frames pass, so the 200 ms accordion exit it may
-     * start cannot finish. [whileHeld] then looks at the first frames after the change.
+     * start cannot finish. [whileHeld] then looks at those first frames: a menu still there is stuck open on
+     * a row that has not finished leaving.
      */
     private fun inTheFirstFramesAfter(change: () -> Unit, whileHeld: () -> Unit) {
         compose.mainClock.autoAdvance = false

@@ -276,11 +276,13 @@ private fun NumberField(
     }
 
     // The row collapsed or left the screen while this field had unsaved text: apply it, do not touch state.
+    // Unsaved means typed and not yet committed (dirty). A draft that only follows the model is not: after an
+    // undo the model has moved on, and writing the old text back would undo the undo.
     val draftNow = rememberUpdatedState(value.text)
     val atFocusNow = rememberUpdatedState(atFocus)
     DisposableEffect(Unit) {
         onDispose {
-            if (enabled && draftBandCount == bandCountNow.value() && NumericField.shouldCommit(atFocusNow.value, draftNow.value)) {
+            if (enabled && dirty && draftBandCount == bandCountNow.value() && NumericField.shouldCommit(atFocusNow.value, draftNow.value)) {
                 when (val r = parse(draftNow.value)) {
                     is FieldParse.Value -> applyNow.value(r.value)
                     is FieldParse.Clamped -> applyNow.value(r.value)
