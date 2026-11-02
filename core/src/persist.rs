@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::error::EqError;
 use crate::inner::{DEFAULT_FRAME_MS, Inner, MAX_FRAME_MS, MIN_FRAME_MS, TONE_MAX_DB};
 use crate::presets::{self, Preset};
+use crate::rules::{self, AppRule, MAX_APP_RULES};
 use crate::model::{
     Band, EqMode, EqState, GRAPHIC_COUNTS, GRAPHIC_MAX_DB, GraphicState, MAX_BANDS, MAX_GAIN_DB,
 };
@@ -65,6 +66,8 @@ pub struct PersistedState {
     pub presets: Vec<Preset>,
     #[serde(default)]
     pub active_preset: Option<String>,
+    #[serde(default)]
+    pub app_rules: Vec<AppRule>,
 }
 
 impl PersistedState {
@@ -83,6 +86,7 @@ impl PersistedState {
             frame_duration_ms: s.frame_duration_ms,
             presets: s.presets.clone(),
             active_preset: s.active_preset.clone(),
+            app_rules: s.app_rules.clone(),
         }
     }
 
@@ -100,6 +104,7 @@ impl PersistedState {
             frame_duration_ms: self.frame_duration_ms,
             presets: self.presets,
             active_preset: self.active_preset,
+            app_rules: self.app_rules,
             ..Inner::default()
         }
     }
@@ -159,7 +164,9 @@ fn sanitize_counted(mut p: PersistedState) -> Result<(PersistedState, u32), EqEr
     if !resolves {
         p.active_preset = None;
     }
-    Ok((p, removed))
+    let (kept, fixed) = rules::sanitize_rules(std::mem::take(&mut p.app_rules), &p.presets);
+    p.app_rules = kept;
+    Ok((p, removed.saturating_add(fixed)))
 }
 
 fn count(repairs: &mut u32) {
@@ -268,6 +275,30 @@ fn read_presets(raw: Option<Value>, repairs: &mut u32) -> Vec<Preset> {
     }
 }
 
+/// App rules one at a time: one that does not read is dropped and counted, rules past the limit
+/// are cut and counted (by `sanitize`). An entry that is not a list is no rules, counted.
+fn read_app_rules(raw: Option<Value>, repairs: &mut u32) -> Vec<AppRule> {
+    match raw {
+        None => Vec::new(),
+        Some(Value::Array(items)) => items
+            .into_iter()
+            // Past twice the limit nothing is parsed: the rest is cut by `sanitize` and counted.
+            .take(MAX_APP_RULES * 2)
+            .filter_map(|v| match serde_json::from_value::<AppRule>(v) {
+                Ok(r) => Some(r),
+                Err(_) => {
+                    count(repairs);
+                    None
+                }
+            })
+            .collect(),
+        Some(_) => {
+            count(repairs);
+            Vec::new()
+        }
+    }
+}
+
 /// Parses bytes (size is checked by the caller before this).
 ///
 /// Only the envelope is strict: bytes that are not a JSON object, or a `version` that is missing,
@@ -308,6 +339,7 @@ pub fn parse(bytes: &[u8]) -> Result<Inner, EqError> {
             Some(Value::String(key)) => Some(key),
             _ => None,
         },
+        app_rules: read_app_rules(o.remove("app_rules"), r),
     };
     // Every value above is typed and finite; this clamps the ranges and drops unusable presets.
     // It cannot fail on such input, and if it ever did the file is Corrupt rather than a panic.

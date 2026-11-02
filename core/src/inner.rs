@@ -9,6 +9,7 @@ use crate::graphic;
 use crate::grid::{self, Grid};
 use crate::headroom::{self, LimiterParams};
 use crate::history::{EditSnapshot, History, PresetCtx};
+use crate::rules::AppRule;
 use crate::presets::{self, MAX_USER_PRESETS, Preset, PresetCurve};
 use crate::model::{Band, EqMode, EqState, FilterKind, GraphicState, MAX_BANDS, MAX_GAIN_DB};
 
@@ -51,6 +52,8 @@ pub struct Inner {
     /// How many saved entries the last load dropped or reset to a default. Never saved, not in
     /// undo history and not part of `Snapshot`; the app reads it once after opening the file.
     pub load_repairs: u32,
+    /// Per-app rules: saved, but not undoable and not in history (see `rules`).
+    pub app_rules: Vec<AppRule>,
 }
 
 impl Default for Inner {
@@ -71,6 +74,7 @@ impl Default for Inner {
             history: History::default(),
             engine_band_cap: None,
             load_repairs: 0,
+            app_rules: Vec::new(),
         }
     }
 }
@@ -534,6 +538,7 @@ impl Inner {
             self.active_preset = Some(new_key.clone());
         }
         self.history.rekey(key, Some(&new_key));
+        self.rekey_rules(key, Some(&new_key));
         Ok(new_key)
     }
 
@@ -545,6 +550,7 @@ impl Inner {
             self.active_preset = None;
         }
         self.history.rekey(key, None);
+        self.rekey_rules(key, None);
         Ok(())
     }
 

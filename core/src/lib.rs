@@ -18,6 +18,7 @@ pub(crate) mod import;
 pub mod model;
 pub mod persist;
 pub mod presets;
+pub mod rules;
 
 pub use api::EqCore;
 pub use error::EqError;
