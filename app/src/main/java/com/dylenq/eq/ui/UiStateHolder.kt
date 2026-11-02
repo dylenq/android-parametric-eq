@@ -11,6 +11,9 @@ import com.dylenq.eq.core.InternalException
 import com.dylenq.eq.core.Snapshot
 import com.dylenq.eq.service.ServiceStatus
 import com.dylenq.eq.service.usableSampleRate
+import com.dylenq.eq.shizuku.NoShizukuGateway
+import com.dylenq.eq.shizuku.ShizukuGateway
+import com.dylenq.eq.shizuku.ShizukuGrantFlow
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -41,7 +44,10 @@ import kotlinx.coroutines.launch
  * limitation (UNVERIFIED known-limitations entry, written by plan 12). Undo, redo and mode
  * switching are inert while a gesture is open.
  */
-class UiStateHolder(val runtime: EqRuntime) {
+class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuGateway) {
+    /** Gateway behind the Use Shizuku button; tests swap in a fake. */
+    @Volatile var shizuku: ShizukuGateway = shizuku
+
     private val controller = runtime.controller
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Any()
@@ -708,6 +714,13 @@ class UiStateHolder(val runtime: EqRuntime) {
 
     fun dismissNotice() {
         runtime.dismissNotice()
+    }
+
+    /** Use Shizuku: grants DUMP through the gateway, then has the tracker re-read the permission. Returns the sentence to show. */
+    suspend fun grantWithShizuku(): String {
+        val result = ShizukuGrantFlow.run(shizuku)
+        runtime.recheckTracking()
+        return TrackingCopy.shizukuMessage(result)
     }
 
     fun close() {

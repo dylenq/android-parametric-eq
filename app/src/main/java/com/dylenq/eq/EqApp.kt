@@ -3,6 +3,7 @@ package com.dylenq.eq
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import com.dylenq.eq.shizuku.RealShizukuGateway
 import com.dylenq.eq.ui.UiPrefs
 import com.dylenq.eq.ui.UiStateHolder
 
@@ -43,7 +44,7 @@ class EqApp : Application() {
         synchronized(this) {
             holder?.takeIf { it.runtime === rt }?.let { return it }
             holder?.close()
-            return UiStateHolder(rt).also { holder = it }
+            return UiStateHolder(rt, RealShizukuGateway(this)).also { holder = it }
         }
     }
 

@@ -1,5 +1,7 @@
 package com.dylenq.eq.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,12 +18,14 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -32,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,12 +50,18 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dylenq.eq.R
 import com.dylenq.eq.service.SessionInfo
 import com.dylenq.eq.service.SessionState
+import com.dylenq.eq.service.TrackingState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 const val GLOBAL_MODE_TITLE = "Global mode (legacy)"
 const val GLOBAL_MODE_SUPPORTING =
@@ -83,6 +94,16 @@ fun SettingsScreen(
     LaunchedEffect(status.globalMode, status.notice) { pending = null }
     val globalOn = pending ?: status.globalMode
     var startOnBoot by remember { mutableStateOf(runtime.settings.startOnBoot) }
+    var trackingOn by remember { mutableStateOf(runtime.settings.playerTracking) }
+    val needsPermission = status.tracking == TrackingState.NeedsPermission
+    // A grant (ADB or Shizuku) takes effect with no restart: look again on resume and every 2 s while the setup is shown.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { runtime.recheckTracking() }
+    LaunchedEffect(needsPermission) {
+        while (needsPermission) {
+            delay(TRACKING_POLL_MS)
+            runtime.recheckTracking()
+        }
+    }
     val sessions = remember(status.sessions) { SessionCopy.sorted(status.sessions) }
     val context = LocalContext.current
     val engineBandsLine = status.engineMaxBands?.let { "Engine bands: $it (measured)" } ?: "Engine bands: not measured yet"
@@ -145,6 +166,19 @@ fun SettingsScreen(
                         },
                     )
                 }
+                item(key = "h-tracking") { SectionHeader("Advanced player tracking") }
+                item(key = "tracking") {
+                    TrackingSection(
+                        checked = trackingOn,
+                        state = status.tracking,
+                        packageName = context.packageName,
+                        onChange = { on ->
+                            trackingOn = on
+                            runtime.setPlayerTracking(on)
+                        },
+                        onShizuku = holder::grantWithShizuku,
+                    )
+                }
                 item(key = "h-sessions") {
                     SectionHeader(
                         "Detected audio sessions",
@@ -160,6 +194,89 @@ fun SettingsScreen(
                 item(key = "engine-bands") { EngineBandsRow(engineBandsLine) }
                 item(key = "about") { AboutRow(aboutLine) }
             }
+        }
+    }
+}
+
+const val TRACKING_POLL_MS = 2000L
+
+@Composable
+private fun TrackingSection(
+    checked: Boolean,
+    state: TrackingState,
+    packageName: String,
+    onChange: (Boolean) -> Unit,
+    onShizuku: suspend () -> String,
+) {
+    Column(Modifier.testTag("player-tracking")) {
+        SettingsSwitchRow(
+            tag = "player-tracking-row",
+            title = TrackingCopy.TITLE,
+            supporting = TrackingCopy.SUPPORTING,
+            checked = checked,
+            onChange = onChange,
+        )
+        Text(
+            TrackingCopy.statusLine(state),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (state == TrackingState.NeedsReboot || state is TrackingState.Unsupported) MaterialTheme.colorScheme.error
+            else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("tracking-status")
+                .semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        if (state == TrackingState.NeedsPermission) NeedsPermissionBlock(packageName, onShizuku)
+    }
+}
+
+@Composable
+private fun NeedsPermissionBlock(packageName: String, onShizuku: suspend () -> String) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val command = remember(packageName) { TrackingCopy.adbCommand(packageName) }
+    var copied by remember { mutableStateOf(false) }
+    var shizukuMessage by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(TrackingCopy.WHY, style = MaterialTheme.typography.bodyMedium)
+        Text(TrackingCopy.NEEDS_COMPUTER, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        SelectionContainer {
+            Text(
+                command,
+                style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                modifier = Modifier.fillMaxWidth().testTag("tracking-adb-command"),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(
+                onClick = {
+                    context.getSystemService(ClipboardManager::class.java)
+                        .setPrimaryClip(ClipData.newPlainText("EQ permission command", command))
+                    copied = true
+                },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("tracking-copy"),
+            ) { Text(if (copied) TrackingCopy.COPIED else TrackingCopy.COPY_LABEL) }
+            OutlinedButton(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    shizukuMessage = null
+                    scope.launch {
+                        try {
+                            shizukuMessage = onShizuku()
+                        } finally {
+                            busy = false
+                        }
+                    }
+                },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("tracking-shizuku"),
+            ) { Text(TrackingCopy.SHIZUKU_LABEL) }
+        }
+        shizukuMessage?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.testTag("tracking-shizuku-message").semantics { liveRegion = LiveRegionMode.Polite },
+            )
         }
     }
 }
