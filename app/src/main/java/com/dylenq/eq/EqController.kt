@@ -3,6 +3,7 @@ package com.dylenq.eq
 import com.dylenq.eq.core.CurveData
 import com.dylenq.eq.core.EngineParams
 import com.dylenq.eq.core.EqCore
+import com.dylenq.eq.core.AppRuleInfo
 import com.dylenq.eq.core.Snapshot
 
 /**
@@ -13,6 +14,9 @@ class EqController internal constructor(
     private val core: EqCore,
     private val markDirty: () -> Unit,
 ) {
+    /** Called after a preset was saved, renamed or deleted, so cached preset params are dropped. */
+    internal var onPresetsChanged: () -> Unit = {}
+
     /** Runs [block] on the caller's thread (EqCore is mutex-guarded), then asks the worker to apply. */
     fun <T> edit(block: (EqCore) -> T): T {
         try {
@@ -51,6 +55,36 @@ class EqController internal constructor(
     /** Read-only: one band's own response (dB) on the response-curve grid; never marks dirty. */
     fun bandResponse(index: UInt, points: UInt, sampleRate: UInt): FloatArray =
         core.bandResponseDb(index, points, sampleRate).toFloatArray()
+
+    /** Read-only: the params applying preset [key] would give; throws when the key does not resolve. */
+    fun engineParamsForPreset(key: String, sampleRate: UInt, frameDurationMs: Float): EngineParams =
+        core.engineParamsForPreset(key, sampleRate, frameDurationMs)
+
+    /** Preset changes go through here so the runtime can drop what it cached for the old preset. */
+    fun savePreset(name: String): String = presetEdit { it.savePreset(name) }
+
+    fun renamePreset(key: String, newName: String): String = presetEdit { it.renamePreset(key, newName) }
+
+    fun deletePreset(key: String) = presetEdit { it.deletePreset(key) }
+
+    private fun <T> presetEdit(block: (EqCore) -> T): T = edit {
+        try {
+            block(it)
+        } finally {
+            onPresetsChanged()
+        }
+    }
+
+    /** Read-only: every per-app rule. */
+    fun appRules(): List<AppRuleInfo> = core.appRules()
+
+    /** Records that an app has a session. Not an edit: the caller saves without an apply. */
+    fun noteApp(pkg: String): Boolean = core.noteApp(pkg)
+
+    fun setAppEnabled(pkg: String, on: Boolean) = edit { it.setAppEnabled(pkg, on) }
+
+    /** Null returns the app to the live EQ; a key that does not resolve throws. */
+    fun setAppPreset(pkg: String, key: String?) = edit { it.setAppPreset(pkg, key) }
 
     /** Restores the default bands and 0 dB preamp as one undo step. */
     fun resetBands() = edit { it.resetBands() }

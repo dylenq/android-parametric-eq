@@ -348,7 +348,7 @@ private fun SessionRow(info: SessionInfo) {
             SessionState.OK -> Icon(painterResource(R.drawable.ic_check), null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
             SessionState.NO_CONTROL, SessionState.FAILED ->
                 Icon(painterResource(R.drawable.ic_warning), null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.error)
-            SessionState.SUPPRESSED -> Box(
+            SessionState.SUPPRESSED, SessionState.DISABLED -> Box(
                 Modifier.size(24.dp).border(2.dp, MaterialTheme.colorScheme.onSurfaceVariant, CircleShape).clearAndSetSemantics { },
                 contentAlignment = Alignment.Center,
             ) {

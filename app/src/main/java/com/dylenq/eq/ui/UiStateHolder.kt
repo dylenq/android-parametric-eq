@@ -644,7 +644,7 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
     fun savePresetAs(name: String): PresetResult = presetOp {
         PresetNames.check(name, existingPresetNames())?.let { return@presetOp PresetResult.Rejected(it) }
         val trimmed = name.trim()
-        controller.edit { it.savePreset(trimmed) }
+        controller.savePreset(trimmed)
         republishLocked()
         emit("Saved $trimmed")
         PresetResult.Ok
@@ -659,7 +659,7 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
         if (key == null || name == null) return@presetOp PresetResult.Rejected(PresetNames.NOTHING_TO_SAVE)
         if (!key.startsWith("user:")) return@presetOp PresetResult.Rejected(PresetNames.READ_ONLY)
         if (!s.presetModified) return@presetOp PresetResult.Rejected(PresetNames.NOTHING_TO_SAVE)
-        controller.edit { it.savePreset(name) }
+        controller.savePreset(name)
         republishLocked()
         emit("Saved $name")
         PresetResult.Ok
@@ -669,7 +669,7 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
     fun renamePreset(key: String, newName: String): PresetResult = presetOp {
         val own = controller.snapshot().presets.firstOrNull { it.key == key }?.name
         PresetNames.check(newName, existingPresetNames(), own)?.let { return@presetOp PresetResult.Rejected(it) }
-        controller.edit { it.renamePreset(key, newName.trim()) }
+        controller.renamePreset(key, newName.trim())
         republishLocked()
         PresetResult.Ok
     }
@@ -680,7 +680,7 @@ class UiStateHolder(val runtime: EqRuntime, shizuku: ShizukuGateway = NoShizukuG
             // Resolve the display name from the core before deleting; never show the raw key.
             val name = controller.snapshot().presets.firstOrNull { it.key == key }?.name
                 ?: key.substringAfter(':')
-            controller.edit { it.deletePreset(key) }
+            controller.deletePreset(key)
             republishLocked()
             emit("Deleted $name")
             PresetResult.Ok

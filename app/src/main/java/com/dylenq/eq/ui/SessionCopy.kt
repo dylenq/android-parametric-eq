@@ -10,6 +10,7 @@ object SessionCopy {
         SessionState.NO_CONTROL -> "Android didn't give EQ control of this session"
         SessionState.FAILED -> "The effect couldn't be attached"
         SessionState.SUPPRESSED -> "Covered by global mode"
+        SessionState.DISABLED -> "Turned off for this app"
     }
 
     fun rowTitle(pkg: String): String = if (pkg.isBlank()) "Unknown app" else pkg
@@ -20,7 +21,7 @@ object SessionCopy {
 
     private fun rank(s: SessionState): Int = when (s) {
         SessionState.NO_CONTROL, SessionState.FAILED -> 0
-        SessionState.SUPPRESSED -> 1
+        SessionState.SUPPRESSED, SessionState.DISABLED -> 1
         SessionState.OK -> 2
     }
 

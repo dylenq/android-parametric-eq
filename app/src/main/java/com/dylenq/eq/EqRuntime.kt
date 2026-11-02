@@ -9,6 +9,7 @@ import com.dylenq.eq.core.EqCore
 import com.dylenq.eq.service.EffectFactory
 import com.dylenq.eq.service.EngineProbe
 import com.dylenq.eq.service.RealEngineProbe
+import com.dylenq.eq.service.AppEntry
 import com.dylenq.eq.service.EffectManager
 import com.dylenq.eq.service.RealEffectFactory
 import com.dylenq.eq.service.ServiceStatus
@@ -91,7 +92,25 @@ class EqRuntime(
     }
 
     /** The single entry point for mutating the EQ. */
-    val controller: EqController = EqController(core) { markDirty() }
+    val controller: EqController = EqController(core) { markDirty() }.also { it.onPresetsChanged = { clearPresetCache() } }
+
+    private data class PresetKey(
+        val key: String, val rate: UInt, val frame: Float, val cap: Int?, val limiter: Boolean, val bypass: Boolean,
+    )
+
+    // Preset params by (key, rate, frame, cap, limiter flag, bypass); cleared on any preset save, rename
+    // or delete. Presets are immutable by key, so live edits never touch it (D-08). The generation stops
+    // a lookup that started before a clear from storing a stale result after it.
+    private val presetCache = HashMap<PresetKey, EngineParams>()
+    private var presetGeneration = 0L
+    private val presetLock = Any()
+
+    private fun clearPresetCache() {
+        synchronized(presetLock) {
+            presetCache.clear()
+            presetGeneration++
+        }
+    }
 
     private val attached = AtomicBoolean(false)
     @Volatile private var closed = false
@@ -122,6 +141,9 @@ class EqRuntime(
     private val manager = EffectManager(
         factory, { currentParams() }, { publishStatus() },
         onGlobalRejected = { reason -> onGlobalRejected(reason) },
+        isEnabled = { pkg -> ruleFor(pkg)?.enabled ?: true },
+        presetFor = { pkg -> ruleFor(pkg)?.presetKey },
+        paramsForKey = { key -> presetParams(key) },
     )
 
     // Bypass is core state, so the very first status already carries the loaded value instead of
@@ -153,11 +175,17 @@ class EqRuntime(
                     events.onReceive { c ->
                         when (c) {
                             is Command.Session -> when (val e = c.event) {
-                                is SessionIntent.Event.Open -> manager.onOpen(e.session, e.pkg)
+                                is SessionIntent.Event.Open -> {
+                                    noteApp(e.pkg)
+                                    manager.onOpen(e.session, e.pkg)
+                                }
                                 is SessionIntent.Event.Close -> manager.onClose(e.session)
                             }
                             is Command.SetGlobal -> manager.setGlobalMode(c.on)
-                            is Command.TrackerOpen -> manager.onOpen(c.session, c.pkg, SessionSource.TRACKED)
+                            is Command.TrackerOpen -> {
+                                noteApp(c.pkg)
+                                manager.onOpen(c.session, c.pkg, SessionSource.TRACKED)
+                            }
                             is Command.TrackerClose -> manager.onClose(c.session, SessionSource.TRACKED)
                         }
                     }
@@ -252,6 +280,24 @@ class EqRuntime(
         }
     }
 
+    /** Switches an app on or off. Saved through the debounce; the worker re-evaluates its sessions. */
+    fun setAppEnabled(pkg: String, on: Boolean) {
+        if (closed) return
+        controller.setAppEnabled(pkg, on)
+    }
+
+    /** Gives an app a preset, or null for the live EQ. Returns an error text, or null on success. */
+    fun setAppPreset(pkg: String, key: String?): String? {
+        if (closed) return null
+        return try {
+            controller.setAppPreset(pkg, key)
+            null
+        } catch (t: Throwable) {
+            Log.w("EQ-SVC", "set app preset failed: ${t.javaClass.name}: ${t.message}")
+            "That preset no longer exists."
+        }
+    }
+
     fun setStartOnBoot(on: Boolean) { settings.startOnBoot = on }
 
     /** Set by the service while it runs; null otherwise. */
@@ -330,6 +376,20 @@ class EqRuntime(
         }
     }
 
+    // Worker only. A new package is saved through the debounce without an apply (D-12).
+    private fun noteApp(pkg: String) {
+        try {
+            if (controller.noteApp(pkg)) {
+                needsSave = true
+                restartSaveTimer()
+            }
+        } catch (t: Throwable) {
+            Log.w("EQ-SVC", "noteApp failed: ${t.javaClass.name}: ${t.message}")
+        }
+    }
+
+    private fun ruleFor(pkg: String) = controller.appRules().firstOrNull { it.pkg == pkg }
+
     // Worker only.
     private fun publishStatus() {
         try {
@@ -337,9 +397,13 @@ class EqRuntime(
             val bypass = controller.snapshot().bypass
             val global = manager.isGlobalOn()
             val sessions = manager.sessionInfos()
+            val apps = controller.appRules().map { r ->
+                val live = sessions.firstOrNull { s -> s.pkg == r.pkg }
+                AppEntry(r.pkg, r.enabled, r.presetKey, r.pkg, live != null, live?.state)
+            }
             _status.update {
                 it.copy(
-                    sessionCount = count, bypass = bypass, globalMode = global, sessions = sessions,
+                    sessionCount = count, bypass = bypass, globalMode = global, sessions = sessions, apps = apps,
                     engineMaxBands = measuredCap(),
                 )
             }
@@ -354,6 +418,22 @@ class EqRuntime(
         val rate = usableSampleRate(AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC))
         val frameMs = controller.snapshot().frameDurationMs
         return controller.engineParams(rate, frameMs)
+    }
+
+    // Called on the worker. Throws when the key does not resolve; the manager then uses the live params.
+    private fun presetParams(key: String): EngineParams {
+        ensureProbed()
+        val rate = usableSampleRate(AudioTrack.getNativeOutputSampleRate(AudioManager.STREAM_MUSIC))
+        val snap = controller.snapshot()
+        val ck = PresetKey(key, rate, snap.frameDurationMs, activeEngineBandCap, snap.limiterEnabled, snap.bypass)
+        val gen: Long
+        synchronized(presetLock) {
+            presetCache[ck]?.let { return it }
+            gen = presetGeneration
+        }
+        val p = controller.engineParamsForPreset(key, rate, snap.frameDurationMs)
+        synchronized(presetLock) { if (gen == presetGeneration) presetCache[ck] = p }
+        return p
     }
 
     // Worker only. Not an edit: no markDirty, no undo step.

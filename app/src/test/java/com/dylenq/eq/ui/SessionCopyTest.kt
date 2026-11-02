@@ -11,6 +11,7 @@ class SessionCopyTest {
         assertEquals("Android didn't give EQ control of this session", SessionCopy.stateText(SessionState.NO_CONTROL))
         assertEquals("The effect couldn't be attached", SessionCopy.stateText(SessionState.FAILED))
         assertEquals("Covered by global mode", SessionCopy.stateText(SessionState.SUPPRESSED))
+        assertEquals("Turned off for this app", SessionCopy.stateText(SessionState.DISABLED))
     }
 
     @Test fun blankPackageIsUnknownApp() {

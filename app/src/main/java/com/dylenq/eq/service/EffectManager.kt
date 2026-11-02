@@ -25,6 +25,11 @@ class EffectManager(
     private val onGlobalRejected: (String) -> Unit = {},
     /** Pause between create attempts; injected so tests never sleep. */
     private val sleeper: Sleeper = Sleeper { Thread.sleep(it) },
+    /** Per-app rules (D-07). Not consulted in global mode. Defaults keep every app on the live EQ. */
+    private val isEnabled: (String) -> Boolean = { true },
+    private val presetFor: (String) -> String? = { null },
+    /** Params for a preset key; a null key, or a lookup that throws, uses [params]. */
+    private val paramsForKey: (String) -> EngineParams = { params() },
 ) {
     private data class Key(val layoutId: UInt, val sampleRate: UInt, val frameDurationMs: Float)
     private data class Lim(val limiter: LimiterParams, val enabled: Boolean)
@@ -37,6 +42,8 @@ class EffectManager(
         var state: SessionState,
         /** True once the app announced this session; a tracker close then leaves it alone. */
         var announced: Boolean,
+        /** The preset this entry was built from, or null for the live EQ. A change recreates it (D-10). */
+        val presetKey: String?,
     ) {
         val gains: FloatArray = p.gainsDb.toFloatArray()
         var inputGainL: Float = p.inputGainLeftDb
@@ -52,6 +59,9 @@ class EffectManager(
     /** Sessions tracked while global mode is on (and failed ones): package and last-seen tick, no handle. */
     private class Tracked(val pkg: String, var lastSeen: Long, var announced: Boolean)
     private val suppressed = LinkedHashMap<Int, Tracked>()
+
+    /** Sessions of apps switched off (D-09): tracked with no handle. They count toward the cap. */
+    private val disabled = LinkedHashMap<Int, Tracked>()
     private var globalOn = false
     private var tick = 0L
 
@@ -77,11 +87,22 @@ class EffectManager(
             if (announced) known.announced = true
             return@guarded
         }
+        val off = disabled[session]
+        if (off != null) {
+            off.lastSeen = ++tick
+            if (announced) off.announced = true
+            return@guarded
+        }
         failed.remove(session)
         evictIfFull()
+        if (!isEnabled(pkg)) {
+            disabled[session] = Tracked(pkg, ++tick, announced)
+            return@guarded
+        }
         try {
-            val p = params()
-            sessions[session] = build(session, pkg, p, ++tick, announced)
+            val key = presetFor(pkg)
+            val p = resolve(key, HashMap())
+            sessions[session] = build(session, pkg, p, ++tick, announced, key)
             Log.i(TAG, "attached session=$session pkg=$pkg")
         } catch (t: Throwable) {
             Log.w(TAG, "attach failed session=$session: ${t.javaClass.name}: ${t.message}")
@@ -99,6 +120,8 @@ class EffectManager(
             suppressed.remove(session)
             return@guarded
         }
+        if (trackerOnly && disabled[session]?.announced == true) return@guarded
+        disabled.remove(session)
         if (trackerOnly && sessions[session]?.announced == true) return@guarded
         val e = sessions.remove(session) ?: return@guarded
         releaseQuietly(session, e.handle)
@@ -107,13 +130,40 @@ class EffectManager(
 
     /** Fetches the params once and brings every session up to date (diff, or recreate on a key change). */
     fun applyLatest() = guarded("apply") {
-        val p = params()
+        val live = params()
+        // One lookup per distinct preset key per cycle, so a drag does not re-fit per session (D-08).
+        val cache = HashMap<String?, EngineParams>()
+        cache[null] = live
         for ((id, e) in sessions.entries.toList()) {
             try {
-                applyOne(id, e, p)
+                if (globalOn || id == GLOBAL_ID) {
+                    applyOne(id, e, live, null)
+                } else if (!isEnabled(e.pkg)) {
+                    releaseQuietly(id, e.handle)
+                    sessions.remove(id)
+                    disabled[id] = Tracked(e.pkg, e.lastSeen, e.announced)
+                    Log.i(TAG, "disabled session=$id pkg=${e.pkg}")
+                } else {
+                    val key = presetFor(e.pkg)
+                    applyOne(id, e, resolve(key, cache), key)
+                }
             } catch (t: Throwable) {
                 Log.w(TAG, "apply failed session=$id: ${t.javaClass.name}: ${t.message}")
                 dropToFailed(id, e)
+            }
+        }
+        if (!globalOn) {
+            for ((id, t) in disabled.entries.toList()) {
+                if (!isEnabled(t.pkg)) continue
+                disabled.remove(id)
+                try {
+                    val key = presetFor(t.pkg)
+                    sessions[id] = build(id, t.pkg, resolve(key, cache), t.lastSeen, t.announced, key)
+                    Log.i(TAG, "enabled session=$id pkg=${t.pkg}")
+                } catch (x: Throwable) {
+                    Log.w(TAG, "attach failed session=$id: ${x.javaClass.name}: ${x.message}")
+                    recordFailure(id, t.pkg, t.announced)
+                }
             }
         }
         if (globalOn && sessions[GLOBAL_ID] == null) rejectGlobal("the effect could not be kept")
@@ -136,11 +186,13 @@ class EffectManager(
             releaseQuietly(id, e.handle)
         }
         sessions.clear()
+        for ((id, d) in disabled) suppressed.getOrPut(id) { d }
+        disabled.clear()
         for ((id, f) in failed) suppressed.getOrPut(id) { Tracked(f.pkg, ++tick, f.announced) }
         failed.clear()
         try {
             val p = params()
-            val g = build(GLOBAL_ID, GLOBAL_PKG, p, ++tick, true)
+            val g = build(GLOBAL_ID, GLOBAL_PKG, p, ++tick, true, null)
             if (g.state != SessionState.OK) {
                 releaseQuietly(GLOBAL_ID, g.handle)
                 throw IllegalStateException("no control of the output mix")
@@ -182,10 +234,15 @@ class EffectManager(
         val tracked = suppressed.entries.toList()
         suppressed.clear()
         if (tracked.isEmpty()) return
-        val p = try { params() } catch (t: Throwable) { null }
+        val cache = HashMap<String?, EngineParams>()
         for ((id, t) in tracked) {
             try {
-                sessions[id] = build(id, t.pkg, p ?: params(), t.lastSeen, t.announced)
+                if (!isEnabled(t.pkg)) {
+                    disabled[id] = t
+                    continue
+                }
+                val key = presetFor(t.pkg)
+                sessions[id] = build(id, t.pkg, resolve(key, cache), t.lastSeen, t.announced, key)
             } catch (x: Throwable) {
                 Log.w(TAG, "restore failed session=$id: ${x.javaClass.name}: ${x.message}")
                 recordFailure(id, t.pkg, t.announced)
@@ -198,11 +255,12 @@ class EffectManager(
         sessions.clear()
         failed.clear()
         suppressed.clear()
+        disabled.clear()
         globalOn = false
     }
 
     /** Tracked app sessions (the global effect itself is not counted). */
-    fun sessionCount(): Int = if (globalOn) suppressed.size else sessions.size
+    fun sessionCount(): Int = if (globalOn) suppressed.size else sessions.size + disabled.size
 
     fun handleFor(session: Int): EffectHandle? = sessions[session]?.handle
 
@@ -211,25 +269,41 @@ class EffectManager(
             suppressed.map { (id, t) -> SessionInfo(id, t.pkg, SessionState.SUPPRESSED, !t.announced) }
         } else {
             sessions.map { (id, e) -> SessionInfo(id, e.pkg, e.state, !e.announced) } +
-                failed.map { (id, f) -> SessionInfo(id, f.pkg, SessionState.FAILED, !f.announced) }
+                failed.map { (id, f) -> SessionInfo(id, f.pkg, SessionState.FAILED, !f.announced) } +
+                disabled.map { (id, t) -> SessionInfo(id, t.pkg, SessionState.DISABLED, !t.announced) }
         }
 
-    private fun applyOne(id: Int, e: Entry, p: EngineParams) {
+    /** Params for a preset key, memoised in [cache] for one cycle. A lookup that fails uses the live params. */
+    private fun resolve(key: String?, cache: MutableMap<String?, EngineParams>): EngineParams =
+        cache.getOrPut(key) {
+            if (key == null) {
+                params()
+            } else {
+                try {
+                    paramsForKey(key)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "preset lookup failed, using the live EQ: ${t.javaClass.name}: ${t.message}")
+                    cache.getOrPut(null) { params() }
+                }
+            }
+        }
+
+    private fun applyOne(id: Int, e: Entry, p: EngineParams, presetKey: String?) {
         val key = Key(p.layoutId, p.sampleRate, p.frameDurationMs)
-        if (key != e.key || p.gainsDb.size != e.gains.size) {
+        if (key != e.key || p.gainsDb.size != e.gains.size || presetKey != e.presetKey) {
             // Release first: two controllers on one session would fight over it.
-            recreate(id, e, p)
+            recreate(id, e, p, presetKey)
             return
         }
         try {
             if (e.state == SessionState.NO_CONTROL) {
-                if (e.handle.hasControl()) recreate(id, e, p)
+                if (e.handle.hasControl()) recreate(id, e, p, presetKey)
                 return
             }
             diff(e, p)
         } catch (t: Throwable) {
             Log.w(TAG, "handle call failed session=$id, recreating: ${t.javaClass.name}: ${t.message}")
-            recreate(id, e, p)
+            recreate(id, e, p, presetKey)
         }
     }
 
@@ -270,10 +344,10 @@ class EffectManager(
     }
 
     /** Release the old handle, build a fresh one from [p]. A failure here drops the session. */
-    private fun recreate(id: Int, e: Entry, p: EngineParams) {
+    private fun recreate(id: Int, e: Entry, p: EngineParams, presetKey: String?) {
         releaseQuietly(id, e.handle)
         try {
-            sessions[id] = build(id, e.pkg, p, e.lastSeen, e.announced)
+            sessions[id] = build(id, e.pkg, p, e.lastSeen, e.announced, presetKey)
         } catch (t: Throwable) {
             Log.w(TAG, "recreate failed session=$id: ${t.javaClass.name}: ${t.message}")
             sessions.remove(id)
@@ -287,7 +361,7 @@ class EffectManager(
         recordFailure(id, e.pkg, e.announced)
     }
 
-    private fun build(id: Int, pkg: String, p: EngineParams, lastSeen: Long, announced: Boolean): Entry {
+    private fun build(id: Int, pkg: String, p: EngineParams, lastSeen: Long, announced: Boolean, presetKey: String?): Entry {
         val h = retrying(
             CREATE_ATTEMPTS, CREATE_BACKOFF_MS, sleeper,
             { attempt, t -> Log.i(TAG, "create retry $attempt session=$id: ${t.javaClass.name}: ${t.message}") },
@@ -298,15 +372,22 @@ class EffectManager(
             releaseQuietly(id, h)
             throw t
         }
-        return Entry(h, pkg, lastSeen, p, state, announced)
+        return Entry(h, pkg, lastSeen, p, state, announced, presetKey)
     }
 
     private fun evictIfFull() {
-        while (sessions.size >= maxSessions) {
-            val victim = sessions.entries.minByOrNull { it.value.lastSeen } ?: return
-            sessions.remove(victim.key)
-            releaseQuietly(victim.key, victim.value.handle)
-            Log.i(TAG, "evicted session=${victim.key} (cap $maxSessions)")
+        while (sessions.size + disabled.size >= maxSessions) {
+            val live = sessions.entries.minByOrNull { it.value.lastSeen }
+            val off = disabled.entries.minByOrNull { it.value.lastSeen }
+            if (live == null && off == null) return
+            if (off == null || (live != null && live.value.lastSeen <= off.value.lastSeen)) {
+                sessions.remove(live!!.key)
+                releaseQuietly(live.key, live.value.handle)
+                Log.i(TAG, "evicted session=${live.key} (cap $maxSessions)")
+            } else {
+                disabled.remove(off.key)
+                Log.i(TAG, "evicted session=${off.key} (cap $maxSessions)")
+            }
         }
     }
 
