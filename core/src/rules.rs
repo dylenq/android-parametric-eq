@@ -53,7 +53,39 @@ pub(crate) fn sanitize_rules(list: Vec<AppRule>, presets: &[presets::Preset]) ->
     (out, repairs)
 }
 
+/// Most device rules kept. Device names come from the audio system, so the list is bounded.
+pub const MAX_DEVICE_RULES: usize = 32;
+/// Longest device name kept (Bluetooth names are set by the remote device).
+pub const MAX_DEVICE_NAME_CHARS: usize = 100;
+
+/// What to do when an output device connects. `preset_key` of `None` keeps the current sound.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeviceRule {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub preset_key: Option<String>,
+    /// A counter, not a clock: larger is more recent.
+    pub last_seen: u64,
+}
+
 impl Inner {
+    pub fn note_device(&mut self, _key: &str, _name: &str) -> bool {
+        false
+    }
+
+    pub fn set_device_preset(&mut self, _key: &str, _preset: Option<&str>) -> Result<(), EqError> {
+        Ok(())
+    }
+
+    pub fn device_rules(&self) -> &[DeviceRule] {
+        &[]
+    }
+
+    pub fn record_device(&mut self, _key: &str, _name: &str) -> Option<String> {
+        None
+    }
+
     fn next_tick(&self) -> u64 {
         self.app_rules.iter().map(|r| r.last_seen).max().map_or(1, |m| m.saturating_add(1))
     }
@@ -426,5 +458,203 @@ mod tests {
             s.engine_params_for_preset("user:Nope", 48_000, 85.3),
             Err(EqError::NotFound)
         ));
+    }
+
+    fn dev<'a>(s: &'a Inner, key: &str) -> Option<&'a DeviceRule> {
+        s.device_rules().iter().find(|r| r.key == key)
+    }
+
+    #[test]
+    fn note_device_adds_once_and_refresh_is_not_a_change() {
+        let mut s = Inner::default();
+        assert!(s.note_device("speaker", "Phone speaker"));
+        assert!(s.note_device("usb:dac", "USB: DAC"));
+        let first = dev(&s, "speaker").unwrap().last_seen;
+        assert!(!s.note_device("speaker", "Phone speaker"));
+        assert!(dev(&s, "speaker").unwrap().last_seen > first);
+        assert_eq!(s.device_rules().len(), 2);
+        assert!(dev(&s, "usb:dac").unwrap().preset_key.is_none());
+    }
+
+    #[test]
+    fn device_overflow_evicts_the_oldest_default_rule() {
+        let mut s = Inner::default();
+        s.set_device_preset("keep", Some("builtin:Bass")).unwrap();
+        for i in 0..MAX_DEVICE_RULES - 1 {
+            assert!(s.note_device(&format!("dev.{i}"), "D"));
+        }
+        assert!(s.note_device("dev.new", "D"));
+        assert_eq!(s.device_rules().len(), MAX_DEVICE_RULES);
+        assert!(dev(&s, "keep").is_some());
+        assert!(dev(&s, "dev.0").is_none());
+        assert!(dev(&s, "dev.1").is_some());
+        assert!(dev(&s, "dev.new").is_some());
+    }
+
+    #[test]
+    fn a_full_list_of_device_presets_drops_the_new_device() {
+        let mut s = Inner::default();
+        for i in 0..MAX_DEVICE_RULES {
+            s.set_device_preset(&format!("dev.{i}"), Some("builtin:Bass")).unwrap();
+        }
+        assert!(!s.note_device("late", "Late"));
+        assert_eq!(s.record_device("late", "Late"), None);
+        assert!(dev(&s, "late").is_none());
+        assert_eq!(s.device_rules().len(), MAX_DEVICE_RULES);
+    }
+
+    #[test]
+    fn device_preset_setter_creates_clears_and_rejects_unknown_keys() {
+        let mut s = Inner::default();
+        assert_eq!(s.set_device_preset("a", Some("user:Nope")), Err(EqError::NotFound));
+        assert!(dev(&s, "a").is_none());
+        s.set_device_preset("a", Some("builtin:Bass")).unwrap();
+        assert_eq!(dev(&s, "a").unwrap().preset_key.as_deref(), Some("builtin:Bass"));
+        assert_eq!(s.set_device_preset("a", Some("user:Nope")), Err(EqError::NotFound));
+        assert_eq!(dev(&s, "a").unwrap().preset_key.as_deref(), Some("builtin:Bass"));
+        s.set_device_preset("a", None).unwrap();
+        assert!(dev(&s, "a").unwrap().preset_key.is_none());
+    }
+
+    #[test]
+    fn record_device_returns_a_preset_only_when_the_device_changed() {
+        let mut s = Inner::default();
+        assert_eq!(s.record_device("a", "A"), None);
+        assert_eq!(s.last_device.as_deref(), Some("a"));
+        s.set_device_preset("a", Some("builtin:Bass")).unwrap();
+        // Same device as last time (a restart): nothing to apply.
+        assert_eq!(s.record_device("a", "A"), None);
+        s.record_device("b", "B");
+        assert_eq!(s.record_device("a", "A").as_deref(), Some("builtin:Bass"));
+        assert_eq!(s.record_device("a", "A"), None);
+    }
+
+    #[test]
+    fn a_device_without_a_preset_keeps_the_sound_but_updates_last_device() {
+        let mut s = Inner::default();
+        s.set_device_preset("a", Some("builtin:Bass")).unwrap();
+        s.record_device("a", "A");
+        assert_eq!(s.record_device("plain", "Plain"), None);
+        assert_eq!(s.last_device.as_deref(), Some("plain"));
+        assert!(dev(&s, "plain").is_some());
+    }
+
+    #[test]
+    fn device_names_and_keys_are_length_limited() {
+        let mut s = Inner::default();
+        assert!(!s.note_device("", "x"));
+        assert!(!s.note_device(&"k".repeat(MAX_PKG_CHARS + 1), "x"));
+        assert!(s.note_device("k", &"n".repeat(MAX_DEVICE_NAME_CHARS + 50)));
+        assert_eq!(dev(&s, "k").unwrap().name.chars().count(), MAX_DEVICE_NAME_CHARS);
+    }
+
+    #[test]
+    fn preset_rename_and_delete_follow_device_assignments() {
+        let mut s = Inner::default();
+        s.save_preset("Mine").unwrap();
+        s.set_device_preset("a", Some("user:Mine")).unwrap();
+        let new_key = s.rename_preset("user:Mine", "Theirs").unwrap();
+        assert_eq!(dev(&s, "a").unwrap().preset_key.as_deref(), Some(new_key.as_str()));
+        s.delete_preset(&new_key).unwrap();
+        assert!(dev(&s, "a").unwrap().preset_key.is_none());
+    }
+
+    #[test]
+    fn device_rules_survive_save_and_load() {
+        let mut s = Inner::default();
+        s.save_preset("Mine").unwrap();
+        s.note_device("speaker", "Phone speaker");
+        s.set_device_preset("bt:Buds", Some("user:Mine")).unwrap();
+        s.record_device("bt:Buds", "Bluetooth: Buds");
+        let l = roundtrip(&s);
+        assert_eq!(l.device_rules(), s.device_rules());
+        assert_eq!(l.last_device.as_deref(), Some("bt:Buds"));
+        assert_eq!(l.load_repairs, 0);
+    }
+
+    #[test]
+    fn an_old_file_loads_with_no_devices_and_no_repair() {
+        let l = persist::parse(br#"{"version":1,"app_rules":[]}"#).unwrap();
+        assert!(l.device_rules().is_empty());
+        assert!(l.last_device.is_none());
+        assert_eq!(l.load_repairs, 0);
+    }
+
+    #[test]
+    fn a_malformed_device_costs_only_itself() {
+        let json = r#"{"version":1,"last_device":"speaker","device_rules":[
+            {"key":"speaker","name":"Phone speaker","preset_key":null,"last_seen":1},
+            {"key":7,"name":"x"},
+            "junk",
+            {"key":"usb","name":"USB","preset_key":null,"last_seen":2}]}"#;
+        let l = persist::parse(json.as_bytes()).unwrap();
+        assert_eq!(l.device_rules().len(), 2);
+        assert_eq!(l.load_repairs, 2);
+        assert_eq!(l.last_device.as_deref(), Some("speaker"));
+    }
+
+    #[test]
+    fn a_device_list_of_the_wrong_type_is_no_devices_and_counted() {
+        let l = persist::parse(br#"{"version":1,"device_rules":5,"last_device":3}"#).unwrap();
+        assert!(l.device_rules().is_empty());
+        assert!(l.last_device.is_none());
+        assert_eq!(l.load_repairs, 2);
+    }
+
+    #[test]
+    fn devices_over_the_limit_in_a_file_are_cut_and_counted() {
+        let items: Vec<String> = (0..40)
+            .map(|i| format!(r#"{{"key":"d.{i}","name":"D","preset_key":null,"last_seen":{i}}}"#))
+            .collect();
+        let json = format!(r#"{{"version":1,"device_rules":[{}]}}"#, items.join(","));
+        let l = persist::parse(json.as_bytes()).unwrap();
+        assert_eq!(l.device_rules().len(), MAX_DEVICE_RULES);
+        assert_eq!(l.load_repairs, 8);
+        let items: Vec<String> = (0..200)
+            .map(|i| format!(r#"{{"key":"d.{i}","name":"D","preset_key":null,"last_seen":{i}}}"#))
+            .collect();
+        let json = format!(r#"{{"version":1,"device_rules":[{}]}}"#, items.join(","));
+        let l = persist::parse(json.as_bytes()).unwrap();
+        assert_eq!(l.device_rules().len(), MAX_DEVICE_RULES);
+        assert_eq!(l.load_repairs, 200 - MAX_DEVICE_RULES as u32);
+    }
+
+    #[test]
+    fn bad_device_strings_and_stale_keys_are_repaired_on_load() {
+        let long_key = "k".repeat(MAX_PKG_CHARS + 1);
+        let long_name = "n".repeat(MAX_DEVICE_NAME_CHARS + 1);
+        let json = format!(
+            r#"{{"version":1,"last_device":"","device_rules":[
+            {{"key":"","name":"Empty","preset_key":null,"last_seen":1}},
+            {{"key":"{long_key}","name":"Long key","preset_key":null,"last_seen":2}},
+            {{"key":"dup","name":"One","preset_key":null,"last_seen":3}},
+            {{"key":"dup","name":"Two","preset_key":null,"last_seen":4}},
+            {{"key":"name","name":"{long_name}","preset_key":null,"last_seen":5}},
+            {{"key":"stale","name":"Stale","preset_key":"user:Gone","last_seen":6}},
+            {{"key":"built","name":"Built","preset_key":"builtin:Bass","last_seen":7}}]}}"#
+        );
+        let l = persist::parse(json.as_bytes()).unwrap();
+        assert_eq!(l.device_rules().len(), 4);
+        // Empty key, long key, duplicate, long name, stale preset, empty last_device.
+        assert_eq!(l.load_repairs, 6);
+        assert!(l.last_device.is_none());
+        assert_eq!(dev(&l, "name").unwrap().name.chars().count(), MAX_DEVICE_NAME_CHARS);
+        assert!(dev(&l, "stale").unwrap().preset_key.is_none());
+        assert_eq!(dev(&l, "built").unwrap().preset_key.as_deref(), Some("builtin:Bass"));
+    }
+
+    #[test]
+    fn device_rules_are_not_undoable_and_do_not_mark_modified() {
+        let mut s = Inner::default();
+        s.apply_preset("builtin:Bass").unwrap();
+        let undo = s.can_undo();
+        s.note_device("a", "A");
+        s.set_device_preset("a", Some("builtin:Bass")).unwrap();
+        s.record_device("a", "A");
+        assert_eq!(s.can_undo(), undo);
+        assert!(!s.can_redo());
+        assert!(!s.is_modified());
+        s.undo();
+        assert!(dev(&s, "a").is_some());
     }
 }

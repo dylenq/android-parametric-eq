@@ -9,7 +9,7 @@ use crate::graphic;
 use crate::grid::{self, Grid};
 use crate::headroom::{self, LimiterParams};
 use crate::history::{EditSnapshot, History, PresetCtx};
-use crate::rules::AppRule;
+use crate::rules::{AppRule, DeviceRule};
 use crate::presets::{self, MAX_USER_PRESETS, Preset, PresetCurve};
 use crate::model::{Band, EqMode, EqState, FilterKind, GraphicState, MAX_BANDS, MAX_GAIN_DB};
 
@@ -54,6 +54,10 @@ pub struct Inner {
     pub load_repairs: u32,
     /// Per-app rules: saved, but not undoable and not in history (see `rules`).
     pub app_rules: Vec<AppRule>,
+    /// Per-device presets, saved like app rules (see `rules`).
+    pub device_rules: Vec<DeviceRule>,
+    /// Key of the output device last seen, saved so a restart on the same device is not a change.
+    pub last_device: Option<String>,
 }
 
 impl Default for Inner {
@@ -75,6 +79,8 @@ impl Default for Inner {
             engine_band_cap: None,
             load_repairs: 0,
             app_rules: Vec::new(),
+            device_rules: Vec::new(),
+            last_device: None,
         }
     }
 }
