@@ -1,6 +1,8 @@
 # Releasing EQ for Android
 
-Release 0.2.0 was published by hand with a test-signed APK, from github.com/dylenq/android-parametric-eq (the git remote is named `github`). No private release keystore exists yet and the three secrets below are not set. These are the steps for a first properly signed release. `<version>` is the `versionName` in `app/build.gradle.kts`.
+Releases 0.2.0 and 0.3.0 were published by hand with test-signed APKs, from github.com/dylenq/android-parametric-eq (the git remote is named `github`). No private release keystore exists yet and the three secrets below are not set. These are the steps for a first properly signed release. `<version>` is the `versionName` in `app/build.gradle.kts`.
+
+Until then, a test-signed release must keep the same key, or it will not install over the last one. `scripts/release-apk.sh --test` creates a new key in any checkout that has none, including a new worktree, so copy `build/test-signing/EQ-TEST-ONLY.jks` from the main checkout first. Its certificate SHA-256 is `deb1b68a6740b154e5a33f4f74ed8b2e7f0cdd15d40d3a76150b332079e5ceb9`; compare it with the line the script prints.
 
 The GitHub workflow in `.github/workflows/release.yml` has never completed a run. It was checked statically only (the YAML parses, and `scripts/check-workflow.sh` confirms pinning, permissions and that no secret appears inside a `run:` block). Its first real run may fail for reasons nobody could see in advance, such as the Android command line tools path on the runner image, or how long `cargo install cargo-ndk` takes. It creates a draft release, so nothing becomes public until you press publish.
 

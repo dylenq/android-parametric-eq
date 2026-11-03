@@ -245,7 +245,7 @@ A real release needs your own keystore. Create one with `scripts/create-keystore
 
 ### Releasing
 
-The steps to publish are in [docs/RELEASING.md](docs/RELEASING.md). The GitHub workflow in `.github/workflows/release.yml` has never completed a run: it needs the release-key secrets, which are not set up yet. Release 0.2.0 was published by hand with the test-signed APK. When it does run, the workflow creates a draft release.
+The steps to publish are in [docs/RELEASING.md](docs/RELEASING.md). The GitHub workflow in `.github/workflows/release.yml` has never completed a run: it needs the release-key secrets, which are not set up yet. Releases 0.2.0 and 0.3.0 were published by hand with the test-signed APK. When it does run, the workflow creates a draft release.
 
 ## License
 
